@@ -87,6 +87,14 @@ passing `cpu_instrs` is the moment the project stops being a toy.
    instead.
 4. **Correctness before speed.** Python will be slow. We do not care yet.
    Optimise only once a real game boots, and only with measurements.
+5. **Byte order belongs to the memory bus, not to `bits.py`.** `bits.py` knows
+   about *widths* (8-bit, 16-bit); endianness is a property of how a value is
+   laid out across addressable cells, so it is the bus's business. `join_bytes`
+   stays order-agnostic and the swap appears exactly once, at the call site
+   where the address arithmetic already lives:
+   `join_bytes(read(addr + 1), read(addr))`. This keeps `bits.py` a leaf module
+   with no imports, and keeps `read16`/`write16`/`push16`/`pop16` provably
+   mirror images of each other. *(Decided in Step 01.)*
 
 ## Reference material
 

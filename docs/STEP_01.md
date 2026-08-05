@@ -130,14 +130,14 @@ Add sections for:
 Implement these, all fully type-hinted:
 
 ```python
-def u8(value: int) -> int: ...          # wrap to 8 bits
-def u16(value: int) -> int: ...         # wrap to 16 bits
+def u8(value: int) -> int: ...  # wrap to 8 bits
+def u16(value: int) -> int: ...  # wrap to 16 bits
 def to_signed8(value: int) -> int: ...  # 0xFF -> -1
 def get_bit(value: int, bit: int) -> bool: ...
 def set_bit(value: int, bit: int) -> int: ...
 def clear_bit(value: int, bit: int) -> int: ...
-def high_byte(value: int) -> int: ...   # 0x1234 -> 0x12
-def low_byte(value: int) -> int: ...    # 0x1234 -> 0x34
+def high_byte(value: int) -> int: ...  # 0x1234 -> 0x12
+def low_byte(value: int) -> int: ...  # 0x1234 -> 0x34
 def join_bytes(high: int, low: int) -> int: ...  # (0x12, 0x34) -> 0x1234
 ```
 
