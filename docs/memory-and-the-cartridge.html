@@ -1,0 +1,1027 @@
+<title>Inside a Game Boy Cartridge — memory, addresses and the boot sequence</title>
+
+<style>
+:root {
+  --paper:  #F0F1EA;
+  --card:   #F7F8F2;
+  --ink:    #171A14;
+  --muted:  #666B60;
+  --rule:   #D6D9CA;
+  --rule-strong: #B9BEAA;
+
+  --neg:  #9E3B2E;
+  --hi:   #6E8C12;
+  --lo:   #A8B84A;
+
+  --c-entry: #46688A;
+  --c-logo:  #4E7A2E;
+  --c-title: #92651A;
+  --c-meta:  #665A8A;
+  --c-hw:    #9E3B2E;
+  --c-size:  #2A7168;
+  --c-sum:   #A15A1E;
+  --c-none:  #8A9080;
+
+  --shadow: 0 1px 0 rgba(23,26,20,.06), 0 6px 20px -12px rgba(23,26,20,.35);
+
+  --mono: ui-monospace, "SF Mono", "JetBrains Mono", "IBM Plex Mono", Menlo, Consolas, monospace;
+  --serif: "Iowan Old Style", "Palatino Linotype", Palatino, Georgia, "Times New Roman", serif;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --paper:  #12140F;
+    --card:   #191C15;
+    --ink:    #E6E8DC;
+    --muted:  #90968A;
+    --rule:   #2B2F24;
+    --rule-strong: #3E4433;
+
+    --neg:  #DB7A68;
+    --hi:   #9BBC0F;
+    --lo:   #5E7A1B;
+
+    --c-entry: #85AAD0;
+    --c-logo:  #9BBC0F;
+    --c-title: #DBA749;
+    --c-meta:  #AA9BD2;
+    --c-hw:    #DB7A68;
+    --c-size:  #63C4B6;
+    --c-sum:   #E28D4C;
+    --c-none:  #6A7060;
+
+    --shadow: 0 1px 0 rgba(0,0,0,.4), 0 8px 24px -14px rgba(0,0,0,.9);
+  }
+}
+
+:root[data-theme="dark"] {
+  --paper:  #12140F;
+  --card:   #191C15;
+  --ink:    #E6E8DC;
+  --muted:  #90968A;
+  --rule:   #2B2F24;
+  --rule-strong: #3E4433;
+  --neg:  #DB7A68;
+  --hi:   #9BBC0F;
+  --lo:   #5E7A1B;
+  --c-entry: #85AAD0;
+  --c-logo:  #9BBC0F;
+  --c-title: #DBA749;
+  --c-meta:  #AA9BD2;
+  --c-hw:    #DB7A68;
+  --c-size:  #63C4B6;
+  --c-sum:   #E28D4C;
+  --c-none:  #6A7060;
+  --shadow: 0 1px 0 rgba(0,0,0,.4), 0 8px 24px -14px rgba(0,0,0,.9);
+}
+
+:root[data-theme="light"] {
+  --paper:  #F0F1EA;
+  --card:   #F7F8F2;
+  --ink:    #171A14;
+  --muted:  #666B60;
+  --rule:   #D6D9CA;
+  --rule-strong: #B9BEAA;
+  --neg:  #9E3B2E;
+  --hi:   #6E8C12;
+  --lo:   #A8B84A;
+  --c-entry: #46688A;
+  --c-logo:  #4E7A2E;
+  --c-title: #92651A;
+  --c-meta:  #665A8A;
+  --c-hw:    #9E3B2E;
+  --c-size:  #2A7168;
+  --c-sum:   #A15A1E;
+  --c-none:  #8A9080;
+  --shadow: 0 1px 0 rgba(23,26,20,.06), 0 6px 20px -12px rgba(23,26,20,.35);
+}
+
+body {
+  background: var(--paper);
+  color: var(--ink);
+  font-family: var(--serif);
+  font-size: 17px;
+  line-height: 1.65;
+  -webkit-font-smoothing: antialiased;
+}
+
+.wrap {
+  max-width: 940px;
+  margin: 0 auto;
+  padding: clamp(2rem, 6vw, 5rem) clamp(1rem, 4vw, 2.5rem) 6rem;
+  display: flex;
+  flex-direction: column;
+  gap: clamp(3rem, 7vw, 5.5rem);
+}
+
+/* ---------- type ---------- */
+
+.eyebrow {
+  font-family: var(--mono);
+  font-size: .72rem;
+  letter-spacing: .18em;
+  text-transform: uppercase;
+  color: var(--muted);
+  margin: 0;
+}
+
+h1 {
+  font-family: var(--mono);
+  font-size: clamp(1.9rem, 5.5vw, 3rem);
+  line-height: 1.08;
+  letter-spacing: -.03em;
+  font-weight: 600;
+  text-wrap: balance;
+  margin: .5rem 0 0;
+}
+
+h2 {
+  font-family: var(--mono);
+  font-size: clamp(1.15rem, 2.6vw, 1.4rem);
+  letter-spacing: -.015em;
+  font-weight: 600;
+  text-wrap: balance;
+  margin: 0;
+}
+
+h3 {
+  font-family: var(--mono);
+  font-size: .82rem;
+  letter-spacing: .1em;
+  text-transform: uppercase;
+  font-weight: 600;
+  color: var(--muted);
+  margin: 0;
+}
+
+p { margin: 0; max-width: 66ch; }
+.lede { font-size: 1.12rem; color: var(--muted); max-width: 60ch; }
+
+section { display: flex; flex-direction: column; gap: 1.4rem; }
+
+.head {
+  display: flex;
+  align-items: baseline;
+  gap: 1rem;
+  border-top: 1.5px solid var(--rule-strong);
+  padding-top: 1rem;
+}
+.head .num {
+  font-family: var(--mono);
+  font-size: .78rem;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+  flex: none;
+  padding-top: .15rem;
+}
+
+code, .m { font-family: var(--mono); font-size: .92em; }
+strong { font-weight: 600; }
+
+a { color: var(--ink); text-decoration-color: var(--rule-strong); text-underline-offset: 3px; }
+a:focus-visible, button:focus-visible { outline: 2px solid var(--hi); outline-offset: 2px; }
+
+.scroller { overflow-x: auto; padding-bottom: .3rem; }
+
+/* ---------- cards ---------- */
+
+.card {
+  background: var(--card);
+  border: 1px solid var(--rule);
+  border-radius: 6px;
+  padding: clamp(1rem, 3vw, 1.6rem);
+  box-shadow: var(--shadow);
+  display: flex;
+  flex-direction: column;
+  gap: 1.1rem;
+}
+
+.hero { display: flex; flex-direction: column; gap: 1.5rem; }
+
+.hint {
+  font-family: var(--mono);
+  font-size: .7rem;
+  letter-spacing: .04em;
+  color: var(--muted);
+}
+
+.note {
+  border-left: 2px solid var(--hi);
+  padding: .1rem 0 .1rem 1rem;
+  color: var(--muted);
+  max-width: 62ch;
+}
+.note b { color: var(--ink); }
+
+.ruby {
+  border-left: 2px solid var(--neg);
+  padding: .1rem 0 .1rem 1rem;
+  color: var(--muted);
+  max-width: 62ch;
+}
+.ruby b { color: var(--ink); }
+
+.split {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(270px, 1fr));
+  gap: 1.4rem;
+}
+
+pre.code {
+  font-family: var(--mono);
+  font-size: .82rem;
+  line-height: 1.6;
+  background: color-mix(in srgb, var(--rule) 32%, transparent);
+  border: 1px solid var(--rule);
+  border-radius: 5px;
+  padding: .85rem 1rem;
+  overflow-x: auto;
+}
+pre.code .c { color: var(--muted); }
+pre.code .out { color: var(--hi); }
+pre.code .bad { color: var(--neg); }
+
+table.data {
+  border-collapse: collapse;
+  font-family: var(--mono);
+  font-size: .84rem;
+  font-variant-numeric: tabular-nums;
+  min-width: 100%;
+}
+table.data th {
+  text-align: left;
+  font-size: .62rem;
+  letter-spacing: .12em;
+  text-transform: uppercase;
+  color: var(--muted);
+  font-weight: 600;
+  padding: 0 1.1rem .5rem 0;
+  border-bottom: 1px solid var(--rule-strong);
+  white-space: nowrap;
+}
+table.data td {
+  padding: .38rem 1.1rem .38rem 0;
+  border-bottom: 1px solid var(--rule);
+  white-space: nowrap;
+}
+table.data td.em { color: var(--hi); font-weight: 600; }
+table.data td.warn { color: var(--neg); }
+table.data tr.spot td { background: color-mix(in srgb, var(--hi) 12%, transparent); }
+
+/* ---------- hex dump ---------- */
+
+.dump {
+  font-family: var(--mono);
+  font-size: clamp(.66rem, 1.6vw, .8rem);
+  font-variant-numeric: tabular-nums;
+  display: inline-flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: min-content;
+}
+.dumprow { display: flex; align-items: center; gap: .8rem; }
+.dumprow .gutter { color: var(--muted); flex: none; letter-spacing: .02em; }
+.dumpbytes { display: flex; gap: 2px; }
+.dumpbytes .sep { width: .5rem; flex: none; }
+
+.by {
+  width: clamp(1.55rem, 3.6vw, 1.95rem);
+  padding: .28rem 0;
+  text-align: center;
+  border: 0;
+  border-radius: 2px;
+  font-family: inherit;
+  font-size: inherit;
+  font-weight: 600;
+  cursor: pointer;
+  background: color-mix(in srgb, var(--fc, var(--c-none)) 14%, transparent);
+  color: var(--fc, var(--c-none));
+  transition: background .1s ease, color .1s ease;
+}
+.by:hover { background: color-mix(in srgb, var(--fc, var(--c-none)) 30%, transparent); }
+.by.sel { background: var(--fc, var(--c-none)); color: var(--paper); }
+.by.faint { opacity: .45; }
+
+.ascii { color: var(--muted); flex: none; white-space: pre; letter-spacing: .04em; }
+
+.legend { display: flex; flex-wrap: wrap; gap: .3rem .9rem; }
+.legend button {
+  display: inline-flex;
+  align-items: center;
+  gap: .4rem;
+  background: none;
+  border: 0;
+  padding: .15rem .1rem;
+  cursor: pointer;
+  font-family: var(--mono);
+  font-size: .68rem;
+  color: var(--muted);
+  letter-spacing: .02em;
+}
+.legend button:hover { color: var(--ink); }
+.legend .sw { width: .7rem; height: .7rem; border-radius: 2px; flex: none; }
+
+.fieldout {
+  border: 1px solid var(--rule);
+  border-radius: 5px;
+  overflow: hidden;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 1px;
+  background: var(--rule);
+}
+.fieldout > div {
+  background: var(--card);
+  padding: .7rem .85rem;
+  display: flex;
+  flex-direction: column;
+  gap: .2rem;
+  min-width: 0;
+}
+.fieldout .k {
+  font-family: var(--mono);
+  font-size: .58rem;
+  letter-spacing: .14em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+.fieldout .v {
+  font-family: var(--mono);
+  font-size: .92rem;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  overflow-wrap: anywhere;
+}
+.fieldout .v.tint { color: var(--fc, var(--ink)); }
+.meaning {
+  font-family: var(--serif);
+  font-size: .95rem;
+  color: var(--muted);
+  min-height: 1.6em;
+}
+.meaning b { color: var(--ink); font-family: var(--mono); font-size: .88rem; }
+
+/* ---------- address-space map ---------- */
+
+.mmap { display: flex; flex-direction: column; gap: 2px; font-family: var(--mono); font-size: .74rem; }
+.mrow {
+  display: grid;
+  grid-template-columns: 8.5rem 1fr auto;
+  gap: .9rem;
+  align-items: center;
+  padding: .34rem .6rem;
+  border-radius: 3px;
+  background: color-mix(in srgb, var(--fc, var(--c-none)) 12%, transparent);
+  border-left: 3px solid var(--fc, var(--c-none));
+}
+.mrow .range { color: var(--muted); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.mrow .what { color: var(--ink); }
+.mrow .size { color: var(--muted); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.mrow.spot { background: color-mix(in srgb, var(--fc, var(--c-none)) 26%, transparent); }
+
+/* ---------- boot timeline ---------- */
+
+.tl { display: flex; flex-direction: column; }
+.tlstep {
+  display: grid;
+  grid-template-columns: 2.2rem 1fr;
+  gap: 1rem;
+  padding-bottom: 1.25rem;
+  position: relative;
+}
+.tlstep:not(:last-child)::before {
+  content: "";
+  position: absolute;
+  left: 1.09rem;
+  top: 1.85rem;
+  bottom: .1rem;
+  width: 1.5px;
+  background: var(--rule-strong);
+}
+.tlstep .dot {
+  width: 2.2rem;
+  height: 2.2rem;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  font-family: var(--mono);
+  font-size: .78rem;
+  font-weight: 600;
+  background: color-mix(in srgb, var(--fc, var(--hi)) 16%, transparent);
+  color: var(--fc, var(--hi));
+  border: 1.5px solid color-mix(in srgb, var(--fc, var(--hi)) 45%, transparent);
+  z-index: 1;
+  flex: none;
+}
+.tlstep .body { display: flex; flex-direction: column; gap: .3rem; padding-top: .18rem; }
+.tlstep .t {
+  font-family: var(--mono);
+  font-size: .8rem;
+  font-weight: 600;
+  letter-spacing: -.01em;
+}
+.tlstep .d { color: var(--muted); font-size: .95rem; max-width: 58ch; }
+.tlstep .pc {
+  font-family: var(--mono);
+  font-size: .64rem;
+  color: var(--muted);
+  letter-spacing: .06em;
+  text-transform: uppercase;
+}
+.tlstep.halt .t { color: var(--neg); }
+
+/* ---------- overlay before/after ---------- */
+
+.ovwrap { display: grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); gap: 1.2rem; }
+.ov { display: flex; flex-direction: column; gap: 2px; font-family: var(--mono); font-size: .72rem; }
+.ovrow {
+  display: flex;
+  justify-content: space-between;
+  gap: .8rem;
+  padding: .4rem .65rem;
+  border-radius: 3px;
+  border: 1px solid var(--rule);
+}
+.ovrow .a { color: var(--muted); font-variant-numeric: tabular-nums; }
+.ovrow.boot { background: color-mix(in srgb, var(--c-entry) 18%, transparent); border-color: color-mix(in srgb, var(--c-entry) 40%, transparent); color: var(--c-entry); }
+.ovrow.cart { background: color-mix(in srgb, var(--c-logo) 16%, transparent); border-color: color-mix(in srgb, var(--c-logo) 38%, transparent); color: var(--c-logo); }
+.ovrow.hidden-rom { opacity: .38; text-decoration: line-through; }
+
+/* ---------- shift ladder ---------- */
+
+.ladder { display: flex; flex-direction: column; gap: 3px; font-family: var(--mono); font-size: .76rem; }
+.lrow {
+  display: grid;
+  grid-template-columns: 3.4rem 1fr 5.5rem 5rem;
+  gap: .7rem;
+  align-items: center;
+  padding: .26rem .5rem;
+  border-radius: 3px;
+}
+.lrow:nth-child(odd) { background: color-mix(in srgb, var(--rule) 38%, transparent); }
+.lrow .raw { color: var(--c-size); font-weight: 700; }
+.lrow .bar {
+  height: .62rem;
+  border-radius: 2px;
+  background: var(--c-size);
+  min-width: 2px;
+  opacity: .8;
+}
+.lrow .val, .lrow .bk { color: var(--muted); font-variant-numeric: tabular-nums; text-align: right; }
+.lrow.spot { background: color-mix(in srgb, var(--c-size) 20%, transparent); }
+.lrow.spot .val, .lrow.spot .bk { color: var(--ink); }
+
+/* ---------- checksum stepper ---------- */
+
+.steps { display: flex; flex-direction: column; gap: 1px; font-family: var(--mono); font-size: .76rem; font-variant-numeric: tabular-nums; }
+.strow {
+  display: grid;
+  grid-template-columns: 4rem 3rem 2.5rem 1fr;
+  gap: .8rem;
+  padding: .26rem .5rem;
+  border-radius: 3px;
+  align-items: baseline;
+}
+.strow:nth-child(even) { background: color-mix(in srgb, var(--rule) 34%, transparent); }
+.strow .ad { color: var(--muted); }
+.strow .bv { color: var(--c-title); font-weight: 600; }
+.strow .ch { color: var(--muted); }
+.strow .calc { color: var(--ink); }
+.strow .calc em { font-style: normal; color: var(--c-sum); font-weight: 700; }
+.strow.wrapped .calc em { color: var(--neg); }
+
+.tot {
+  font-family: var(--mono);
+  font-size: .84rem;
+  color: var(--muted);
+}
+.tot b { color: var(--ink); }
+
+footer {
+  border-top: 1.5px solid var(--rule-strong);
+  padding-top: 1.2rem;
+  color: var(--muted);
+  font-size: .9rem;
+  max-width: 62ch;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  * { transition: none !important; animation: none !important; }
+}
+</style>
+
+<div class="wrap">
+
+  <header class="hero">
+    <p class="eyebrow">Emulator notes · Game Boy hardware</p>
+    <h1>Inside a cartridge</h1>
+    <p class="lede">A byte has no meaning. It is eight lit-or-unlit squares, and nothing more. Meaning is a convention applied by whoever reads it — which is why the same byte <span class="m">0x02</span> means “MBC1 with RAM” at one address and “128 KiB” at the next one along.</p>
+
+    <div class="card">
+      <h3>Click any byte — this is a real 32 KiB cartridge header</h3>
+      <div class="scroller">
+        <div class="dump" id="dump"></div>
+      </div>
+      <div class="legend" id="legend"></div>
+      <div class="fieldout">
+        <div><span class="k">Field</span><span class="v tint" id="fName">—</span></div>
+        <div><span class="k">Address</span><span class="v" id="fAddr">—</span></div>
+        <div><span class="k">Raw bytes</span><span class="v" id="fRaw">—</span></div>
+      </div>
+      <p class="meaning" id="fMean">Every byte above is a real value from a valid ROM-only header. Select one to see what the console makes of it.</p>
+    </div>
+  </header>
+
+  <section>
+    <div class="head"><span class="num">01</span><h2>Two numbers that are constantly confused</h2></div>
+    <p>Almost every early misunderstanding about memory traces back to this one distinction. When <span class="m">0x0148</span> and <span class="m">0x00</span> appear in the same sentence, they are not the same kind of thing at all:</p>
+
+    <div class="split">
+      <div class="card">
+        <h3>The address</h3>
+        <p><strong>Where</strong> a byte lives. A 16-bit number, <span class="m">0x0000</span>–<span class="m">0xFFFF</span>, because the Game Boy has 16 address wires. It is not stored anywhere — it is what you put on the wires to select a slot.</p>
+        <p class="hint">Four hex digits. Always.</p>
+      </div>
+      <div class="card">
+        <h3>The contents</h3>
+        <p><strong>What</strong> is in that slot. An 8-bit number, <span class="m">0x00</span>–<span class="m">0xFF</span>, because each slot is eight squares wide. This is the thing that actually exists in silicon.</p>
+        <p class="hint">Two hex digits. Always.</p>
+      </div>
+    </div>
+
+    <p>Think of memory as a very long shelf with 65,536 numbered slots, each holding exactly one byte. The slot number is the address; the byte is the contents. Two hex digits means you are looking at contents. Four hex digits means you are looking at a position.</p>
+
+    <div class="card">
+      <h3>The same shelf, read three ways</h3>
+      <pre class="code"><span class="c">Address:   0x0147     ← 4 digits: which slot on the shelf</span>
+<span class="c">Contents:    0x00     ← 2 digits: the byte sitting in it</span>
+<span class="c">Meaning:  ROM_ONLY     ← what the spec says that byte means HERE</span></pre>
+      <p class="hint">The third line exists only in the documentation. The hardware knows nothing about it.</p>
+    </div>
+
+    <div class="note"><b>Why the header is a particularly bad offender.</b> Its fields are one or two bytes each, so a 4-digit address sits next to a 2-digit value on every line, and the eye wants to read them as the same kind of number. They never are. In the hex dump above, the grey column on the left is addresses; everything colourful is contents.</div>
+  </section>
+
+  <section>
+    <div class="head"><span class="num">02</span><h2>The shelf, end to end</h2></div>
+    <p>All 65,536 slots exist whether or not anything is behind them. Different <em>regions</em> of the shelf are wired to different chips, and the component that routes an address to the right one is the memory bus — the heart of any emulator.</p>
+
+    <div class="scroller">
+      <div class="mmap" id="mmap"></div>
+    </div>
+
+    <p>Notice how little of it is the cartridge: the ROM gets <span class="m">0x0000</span>–<span class="m">0x7FFF</span>, just 32 KiB of the 64 KiB space. Everything above <span class="m">0x8000</span> is the console's own hardware.</p>
+
+    <div class="note"><b>This is why bank switching exists.</b> A 16-bit address can name 65,536 slots and no more. Pokémon Red is 1 MiB. There is no address you could put on the wires to reach byte 900,000 — so the cartridge cheats: it keeps a register saying “which 16 KiB chunk is currently visible at <span class="m">0x4000</span>–<span class="m">0x7FFF</span>”, and the game rewrites that register as it runs. The address does not change. What answers to it does. Byte <span class="m">0x0147</span> of the header is what declares which chip does the answering.</div>
+  </section>
+
+  <section>
+    <div class="head"><span class="num">03</span><h2>The ROM file and the address space are the same bytes</h2></div>
+    <p>A <span class="m">.gb</span> file on disk is a plain array of bytes, indexed from zero. The console maps the first 32 KiB of that array directly onto addresses <span class="m">0x0000</span>–<span class="m">0x7FFF</span>.</p>
+
+    <pre class="code">rom = Path("tetris.gb").read_bytes()   <span class="c"># 32768 bytes</span>
+
+rom[0x0147]        <span class="c"># file offset 0x0147</span>
+bus.read(0x0147)   <span class="c"># memory address 0x0147</span>
+                   <span class="out">→ the same byte, for a 32 KiB cartridge</span></pre>
+
+    <p>So for a ROM-only cartridge, <strong>file offset and memory address are numerically identical</strong>, and the file can be indexed directly. That is why parsing a header needs nothing but slicing — no bus, no CPU, no emulation at all.</p>
+
+    <div class="note"><b>It stops being true the moment a mapper appears.</b> With MBC1, address <span class="m">0x4000</span> might be file offset <span class="m">0x4000</span>, or <span class="m">0x8000</span>, or <span class="m">0x3C000</span> — depending on what the game last wrote to the bank register. Address and offset are only accidentally equal in the simple case, and code that assumes otherwise breaks on the first cartridge larger than 32 KiB.</div>
+
+    <div class="ruby"><b>One way to hold it.</b> The ROM is an array and the address is an index into it — but the memory bus is a <em>function</em> that decides which array, and which index into that array, a given address refers to. For a ROM-only cartridge that function happens to be the identity. For everything else it is not.</div>
+  </section>
+
+  <section>
+    <div class="head"><span class="num">04</span><h2>What happens when you press power, in order</h2></div>
+    <p>Nothing about this order is arbitrary — each step exists because of the one before it.</p>
+
+    <div class="card">
+      <div class="tl" id="timeline"></div>
+    </div>
+
+    <p>Step 6 is the one worth staring at. Before it, addresses <span class="m">0x0000</span>–<span class="m">0x00FF</span> return the boot ROM's bytes; after it, the exact same addresses return the cartridge's bytes. The cartridge data was there the whole time, hidden underneath:</p>
+
+    <div class="ovwrap">
+      <div class="card">
+        <h3>Before — boot ROM mapped</h3>
+        <div class="ov">
+          <div class="ovrow boot"><span class="a">0x0000</span><span>0x31 boot ROM</span></div>
+          <div class="ovrow boot"><span class="a">0x0001</span><span>0xFE boot ROM</span></div>
+          <div class="ovrow hidden-rom"><span class="a">0x0000</span><span>cartridge byte</span></div>
+          <div class="ovrow cart"><span class="a">0x0100</span><span>0x00 cartridge</span></div>
+        </div>
+        <p class="hint">PC starts at 0x0000 and runs the console's own code.</p>
+      </div>
+      <div class="card">
+        <h3>After — 0x01 written to 0xFF50</h3>
+        <div class="ov">
+          <div class="ovrow cart"><span class="a">0x0000</span><span>cartridge byte</span></div>
+          <div class="ovrow cart"><span class="a">0x0001</span><span>cartridge byte</span></div>
+          <div class="ovrow hidden-rom"><span class="a">0x0000</span><span>boot ROM — gone forever</span></div>
+          <div class="ovrow cart"><span class="a">0x0100</span><span>0x00 cartridge</span></div>
+        </div>
+        <p class="hint">The boot ROM cannot be mapped back in without a power cycle.</p>
+      </div>
+    </div>
+
+    <div class="note"><b>Why the entry point is only four bytes.</b> The boot ROM jumps to <span class="m">0x0100</span>, but the header starts at <span class="m">0x0104</span>. That leaves the game exactly four bytes of runway before it would start executing the Nintendo logo as if it were code. So every cartridge puts the same thing there: <span class="m">NOP</span> then <span class="m">JP 0x0150</span> — one padding byte and a jump over its own metadata. Selecting bytes <span class="m">0x0100</span>–<span class="m">0x0103</span> in the dump at the top shows exactly that.</div>
+
+    <div class="card">
+      <h3>What this means for an emulator</h3>
+      <p>Most emulators skip the boot ROM entirely. Its 256 bytes are a separate copyrighted file that may not be present, and its only lasting effect on the machine is the register state it leaves behind. So a CPU can simply start in the post-boot condition:</p>
+      <div class="scroller">
+        <table class="data">
+          <thead><tr><th>Register</th><th>Value</th><th>Why that value</th></tr></thead>
+          <tbody>
+            <tr><td>A</td><td>0x01</td><td>identifies the hardware as DMG</td></tr>
+            <tr><td>F</td><td>0xB0</td><td>flags left over from the checksum routine</td></tr>
+            <tr><td>BC</td><td>0x0013</td><td>leftover</td></tr>
+            <tr><td>DE</td><td>0x00D8</td><td>leftover</td></tr>
+            <tr class="spot"><td>HL</td><td>0x014D</td><td>the address the checksum loop stopped at</td></tr>
+            <tr><td>SP</td><td>0xFFFE</td><td>top of high RAM — the stack grows down from here</td></tr>
+            <tr class="spot"><td>PC</td><td>0x0100</td><td>the cartridge entry point</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <p class="hint">HL = 0x014D is not a coincidence — it is literally where the boot ROM's loop counter finished.</p>
+    </div>
+  </section>
+
+  <section>
+    <div class="head"><span class="num">05</span><h2>A size byte that is not a size</h2></div>
+    <p>This is the most important idea here. The byte at <span class="m">0x0148</span> in the header above is <span class="m">0x00</span>. The ROM is 32,768 bytes. Those two numbers have nothing to do with each other — because the byte is not the size. It is an <strong>index into a rule</strong>:</p>
+
+    <pre class="code">rom_size_bytes = 32768 &lt;&lt; value      <span class="c"># 32 KiB, doubled `value` times</span>
+bank_count     = 2 &lt;&lt; value</pre>
+
+    <p>A single byte can only count to 255. ROM sizes go up to 8 MiB — 8,388,608 — which does not fit. But sizes are always a power of two, so instead of storing the number, you store <em>how many times to double</em>. Eight megabytes becomes the byte <span class="m">0x08</span>.</p>
+
+    <div class="card">
+      <h3>The complete ladder — every legal value of 0x0148</h3>
+      <div class="scroller">
+        <div class="ladder" id="ladder"></div>
+      </div>
+      <p class="hint">Each bar is twice the one above. The highlighted row is the header shown at the top.</p>
+    </div>
+
+    <p>This is the same trick as the place values in a byte, one level up: shifting left by one doubles, so the stored byte is an exponent. It is compression by convention — the spec and the console agree on the rule, so the number never has to be written down.</p>
+
+    <div class="card">
+      <h3>And now the byte that means three different things</h3>
+      <p>Here is the whole point. Take the byte <span class="m">0x02</span>. Put it in three consecutive slots:</p>
+      <div class="scroller">
+        <table class="data">
+          <thead><tr><th>Address</th><th>Byte</th><th>Field</th><th>What 0x02 means there</th></tr></thead>
+          <tbody>
+            <tr><td>0x0147</td><td>0x02</td><td>Cartridge type</td><td class="em">MBC1 + RAM</td></tr>
+            <tr><td>0x0148</td><td>0x02</td><td>ROM size</td><td class="em">128 KiB, 8 banks</td></tr>
+            <tr><td>0x0149</td><td>0x02</td><td>RAM size</td><td class="em">8 KiB, 1 bank</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <p>Identical eight squares. Three unrelated meanings. The <em>address</em> is what selects which decoding rule applies — which is why parsing a header amounts to nothing more than a list of “at this offset, apply this rule”.</p>
+    </div>
+
+    <p>RAM size makes the point even harder, because it is not a shift and not even a sequence. It is a bare lookup table with a hole in it and two values out of order:</p>
+
+    <div class="scroller">
+      <table class="data">
+        <thead><tr><th>Byte at 0x0149</th><th>RAM</th><th>Banks</th></tr></thead>
+        <tbody>
+          <tr><td>0x00</td><td>none</td><td>—</td></tr>
+          <tr><td>0x01</td><td class="warn">unused</td><td>—</td></tr>
+          <tr><td>0x02</td><td>8 KiB</td><td>1</td></tr>
+          <tr><td>0x03</td><td>32 KiB</td><td>4</td></tr>
+          <tr><td>0x04</td><td class="warn">128 KiB</td><td>16</td></tr>
+          <tr><td>0x05</td><td class="warn">64 KiB</td><td>8</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <p><span class="m">0x04</span> is larger than <span class="m">0x05</span>. No formula produces that; it is historical accident, frozen into the spec. Which is why a parser needs a literal lookup table for this field and a shift for the one before it — the encoding is a property of the individual field, not of the machine.</p>
+  </section>
+
+  <section>
+    <div class="head"><span class="num">06</span><h2>The header checksum, one step at a time</h2></div>
+    <p>The algorithm is three lines and depends entirely on 8-bit wraparound — an 8-bit register rolling over like an odometer, doing real work:</p>
+
+    <pre class="code">checksum = 0
+for address in 0x0134 ..= 0x014C:      <span class="c"># title through version, inclusive</span>
+    checksum = (checksum - rom[address] - 1) &amp; 0xFF</pre>
+
+    <p>It starts at zero and immediately goes negative, so the very first step wraps. Here are the opening iterations over the header above, which begin with the title <span class="m">TETRIS</span>:</p>
+
+    <div class="card">
+      <div class="scroller">
+        <div class="steps" id="steps"></div>
+      </div>
+      <p class="tot" id="stepsTotal"></p>
+    </div>
+
+    <p>Every row where the subtraction would go below zero is a wrap — and that is most of them. In a language with fixed-width integers the truncation is free; in one with arbitrary-precision integers, an unmasked running total marches off toward negative infinity and the final comparison never matches.</p>
+
+    <div class="note"><b>The inclusive-range trap.</b> The spec says <span class="m">0x0134</span> through <span class="m">0x014C</span> <em>inclusive</em>, which in Python is <span class="m">range(0x0134, 0x014D)</span> — 25 bytes. Stopping one byte early produces a checksum that is wrong for every ROM in existence, which is at least a loud failure rather than a subtle one.</div>
+  </section>
+
+  <section>
+    <div class="head"><span class="num">07</span><h2>One field faces the other way</h2></div>
+    <p>The global checksum at <span class="m">0x014E</span>–<span class="m">0x014F</span> is a 16-bit value stored <strong>big-endian</strong> — high byte first. Everything else on the Game Boy is little-endian.</p>
+
+    <div class="split">
+      <div class="card">
+        <h3>Global checksum · big-endian</h3>
+        <pre class="code">0x014E: <span class="out">18</span>   <span class="c">← high byte</span>
+0x014F: <span class="out">41</span>   <span class="c">← low  byte</span>
+
+value = 0x1841</pre>
+        <p class="hint">int.from_bytes(rom[0x014E:0x0150], "big")</p>
+      </div>
+      <div class="card">
+        <h3>Everything else · little-endian</h3>
+        <pre class="code">0x0102: <span class="out">50</span>   <span class="c">← low  byte</span>
+0x0103: <span class="out">01</span>   <span class="c">← high byte</span>
+
+value = 0x0150</pre>
+        <p class="hint">the jump target in <span class="m">JP 0x0150</span></p>
+      </div>
+    </div>
+
+    <p>Those two cards hold four bytes from the same header, four addresses apart, read in opposite directions. Nothing in the bytes says which is which — the <em>spec</em> does. Same lesson as section 05: meaning lives in the reader, not the data.</p>
+
+    <div class="note"><b>An argument for where byte order belongs.</b> If the helper that joins two bytes into a 16-bit value stays ignorant of endianness, this exception costs exactly one <span class="m">"big"</span> at one call site. If that helper bakes in little-endian instead, a system with a single big-endian field now needs two functions and a rule for remembering which fields want which. Byte order is a property of how a value is laid out in an addressable store — so it belongs wherever addresses do, and nowhere else.</div>
+  </section>
+
+  <footer>
+    <p>When a header field decodes to something absurd, check the two numbers first: an address used where an offset was meant, or two digits read where the field is four, accounts for most of it. Everything above is documented exhaustively in <a href="https://gbdev.io/pandocs/">Pan Docs</a>, which remains the reference for all of it.</p>
+  </footer>
+
+</div>
+
+<script>
+(function () {
+  "use strict";
+
+  /* A real, valid 32 KiB ROM-only header: 0x0100–0x014F.
+     Checksums below were computed from these exact bytes. */
+  const BASE = 0x0100;
+  const HDR = [
+    0x00,0xC3,0x50,0x01,0xCE,0xED,0x66,0x66,0xCC,0x0D,0x00,0x0B,0x03,0x73,0x00,0x83,
+    0x00,0x0C,0x00,0x0D,0x00,0x08,0x11,0x1F,0x88,0x89,0x00,0x0E,0xDC,0xCC,0x6E,0xE6,
+    0xDD,0xDD,0xD9,0x99,0xBB,0xBB,0x67,0x63,0x6E,0x0E,0xEC,0xCC,0xDD,0xDC,0x99,0x9F,
+    0xBB,0xB9,0x33,0x3E,0x54,0x45,0x54,0x52,0x49,0x53,0x00,0x00,0x00,0x00,0x00,0x00,
+    0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x01,0x01,0x0A,0x18,0x41
+  ];
+
+  const hex = (v, n) => v.toString(16).toUpperCase().padStart(n, "0");
+  const at = (addr) => HDR[addr - BASE];
+
+  const FIELDS = [
+    { s: 0x0100, e: 0x0103, name: "Entry point",       v: "--c-entry",
+      why: "Four bytes of executable code, not data. <b>00</b> is NOP, <b>C3 50 01</b> is JP 0x0150 — a jump over the header that follows. The operand is little-endian: 50 then 01 reads as 0x0150." },
+    { s: 0x0104, e: 0x0133, name: "Nintendo logo",     v: "--c-logo",
+      why: "48 fixed bytes. The boot ROM compares these against its own copy and halts the console on any mismatch — and displays them as the logo that scrolls down. A legal mechanism rather than a technical one: no logo, no boot." },
+    { s: 0x0134, e: 0x0142, name: "Title",             v: "--c-title",
+      why: "ASCII, null-padded. Here: <b>TETRIS</b>. Later hardware carved the manufacturer code out of the tail of this field, which is why the length is ambiguous across documents." },
+    { s: 0x0143, e: 0x0143, name: "CGB flag",          v: "--c-meta",
+      why: "<b>0x00</b> — a plain DMG cartridge. 0x80 means Color-enhanced but backwards compatible, 0xC0 means Color-only. This byte physically overlaps what used to be the last character of the title." },
+    { s: 0x0144, e: 0x0145, name: "New licensee code", v: "--c-meta",
+      why: "Two ASCII characters identifying the publisher. Only consulted when the old licensee code at 0x014B is 0x33 — which it is not here, so this field is ignored." },
+    { s: 0x0146, e: 0x0146, name: "SGB flag",          v: "--c-meta",
+      why: "<b>0x00</b> — no Super Game Boy features. 0x03 would enable them." },
+    { s: 0x0147, e: 0x0147, name: "Cartridge type",    v: "--c-hw",
+      why: "<b>0x00 = ROM ONLY.</b> 32 KiB, no mapper, no RAM, no battery. This single byte decides which chip an emulator has to imitate — the most consequential value in the header." },
+    { s: 0x0148, e: 0x0148, name: "ROM size",          v: "--c-size",
+      why: "<b>0x00</b> is not a size, it is a shift: 32768 &lt;&lt; 0 = <b>32 KiB</b>, 2 banks. Every increment doubles it, up to 0x08 = 8 MiB." },
+    { s: 0x0149, e: 0x0149, name: "RAM size",          v: "--c-size",
+      why: "<b>0x00 = no cartridge RAM.</b> Not a shift and not even ordered — a bare lookup table where 0x04 is 128 KiB and 0x05 is 64 KiB." },
+    { s: 0x014A, e: 0x014A, name: "Destination code",  v: "--c-meta",
+      why: "<b>0x00 = Japan.</b> 0x01 is everywhere else. Almost nothing reads it." },
+    { s: 0x014B, e: 0x014B, name: "Old licensee code", v: "--c-meta",
+      why: "<b>0x01 = Nintendo.</b> A value of 0x33 here means 'look at 0x0144 instead'. Super Game Boy features are ignored unless this byte is 0x33." },
+    { s: 0x014C, e: 0x014C, name: "Mask ROM version",  v: "--c-meta",
+      why: "<b>0x01</b> — the revision number of this printing of the cartridge. Usually 0x00." },
+    { s: 0x014D, e: 0x014D, name: "Header checksum",   v: "--c-sum",
+      why: "<b>0x0A</b>, computed over 0x0134–0x014C by repeated subtraction. The boot ROM verifies this and locks up on a mismatch — one of only two things it enforces." },
+    { s: 0x014E, e: 0x014F, name: "Global checksum",   v: "--c-sum",
+      why: "<b>0x1841</b> — the sum of every byte in the ROM except these two. Stored <b>big-endian</b> — one of the only such fields in the entire system. Nothing verifies it, and real cartridges ship with it wrong." }
+  ];
+
+  const fieldAt = (addr) => FIELDS.find((f) => addr >= f.s && addr <= f.e);
+
+  /* ---- hex dump ---- */
+
+  const dump = document.getElementById("dump");
+  const fName = document.getElementById("fName");
+  const fAddr = document.getElementById("fAddr");
+  const fRaw = document.getElementById("fRaw");
+  const fMean = document.getElementById("fMean");
+
+  function select(field) {
+    document.querySelectorAll(".by").forEach(function (b) {
+      const a = parseInt(b.dataset.addr, 10);
+      const inField = field && a >= field.s && a <= field.e;
+      b.classList.toggle("sel", !!inField);
+      b.classList.toggle("faint", !!field && !inField);
+    });
+
+    if (!field) return;
+
+    const bytes = [];
+    for (let a = field.s; a <= field.e; a++) bytes.push(hex(at(a), 2));
+    const shown = bytes.length > 8 ? bytes.slice(0, 8).join(" ") + " …" : bytes.join(" ");
+
+    fName.textContent = field.name;
+    fName.style.setProperty("--fc", "var(" + field.v + ")");
+    fAddr.textContent = field.s === field.e
+      ? "0x" + hex(field.s, 4)
+      : "0x" + hex(field.s, 4) + "–0x" + hex(field.e, 4);
+    fRaw.textContent = shown + (bytes.length > 1 ? "   (" + bytes.length + " bytes)" : "");
+    fMean.innerHTML = field.why;
+  }
+
+  for (let row = 0; row < HDR.length / 16; row++) {
+    const rowEl = document.createElement("div");
+    rowEl.className = "dumprow";
+
+    const gutter = document.createElement("span");
+    gutter.className = "gutter";
+    gutter.textContent = hex(BASE + row * 16, 4);
+
+    const bytesEl = document.createElement("div");
+    bytesEl.className = "dumpbytes";
+
+    let ascii = "";
+    for (let i = 0; i < 16; i++) {
+      const addr = BASE + row * 16 + i;
+      const value = at(addr);
+      const field = fieldAt(addr);
+
+      if (i === 8) {
+        const sep = document.createElement("span");
+        sep.className = "sep";
+        bytesEl.appendChild(sep);
+      }
+
+      const cell = document.createElement("button");
+      cell.type = "button";
+      cell.className = "by";
+      cell.textContent = hex(value, 2);
+      cell.dataset.addr = String(addr);
+      cell.style.setProperty("--fc", "var(" + (field ? field.v : "--c-none") + ")");
+      cell.setAttribute("aria-label", "0x" + hex(addr, 4) + " — " + (field ? field.name : "unmapped"));
+      bytesEl.appendChild(cell);
+
+      ascii += value >= 32 && value < 127 ? String.fromCharCode(value) : ".";
+    }
+
+    const asciiEl = document.createElement("span");
+    asciiEl.className = "ascii";
+    asciiEl.textContent = ascii;
+
+    rowEl.append(gutter, bytesEl, asciiEl);
+    dump.appendChild(rowEl);
+  }
+
+  dump.addEventListener("click", function (event) {
+    const cell = event.target.closest(".by");
+    if (cell) select(fieldAt(parseInt(cell.dataset.addr, 10)));
+  });
+
+  /* ---- legend ---- */
+
+  const legend = document.getElementById("legend");
+  FIELDS.forEach(function (field) {
+    const b = document.createElement("button");
+    b.type = "button";
+    const sw = document.createElement("span");
+    sw.className = "sw";
+    sw.style.background = "var(" + field.v + ")";
+    const label = document.createElement("span");
+    label.textContent = field.name;
+    b.append(sw, label);
+    b.addEventListener("click", function () { select(field); });
+    legend.appendChild(b);
+  });
+
+  select(FIELDS.find((f) => f.s === 0x0147));
+
+  /* ---- address space map ---- */
+
+  const REGIONS = [
+    ["0x0000–0x3FFF", "ROM bank 00 — always the first 16 KiB of the cartridge", "16 KiB", "--c-logo", true],
+    ["0x4000–0x7FFF", "ROM bank 01–NN — switchable, chosen by the mapper", "16 KiB", "--c-logo", true],
+    ["0x8000–0x9FFF", "VRAM — tiles and tile maps", "8 KiB", "--c-entry", false],
+    ["0xA000–0xBFFF", "External RAM — on the cartridge, if it has any", "8 KiB", "--c-hw", false],
+    ["0xC000–0xCFFF", "WRAM bank 0 — the console's own memory", "4 KiB", "--c-meta", false],
+    ["0xD000–0xDFFF", "WRAM bank 1", "4 KiB", "--c-meta", false],
+    ["0xE000–0xFDFF", "Echo RAM — a mirror of 0xC000–0xDDFF. Do not use", "7.5 KiB", "--c-none", false],
+    ["0xFE00–0xFE9F", "OAM — 40 sprite entries", "160 B", "--c-entry", false],
+    ["0xFEA0–0xFEFF", "Not usable", "96 B", "--c-none", false],
+    ["0xFF00–0xFF7F", "I/O registers — joypad, timer, audio, LCD", "128 B", "--c-sum", false],
+    ["0xFF80–0xFFFE", "HRAM — fast scratch, and where the stack lives", "127 B", "--c-title", false],
+    ["0xFFFF–0xFFFF", "IE — interrupt enable", "1 B", "--c-title", false]
+  ];
+
+  const mmap = document.getElementById("mmap");
+  REGIONS.forEach(function (r) {
+    const row = document.createElement("div");
+    row.className = "mrow" + (r[4] ? " spot" : "");
+    row.style.setProperty("--fc", "var(" + r[3] + ")");
+    row.innerHTML =
+      '<span class="range">' + r[0] + '</span>' +
+      '<span class="what"></span>' +
+      '<span class="size">' + r[2] + '</span>';
+    row.querySelector(".what").textContent = r[1];
+    mmap.appendChild(row);
+  });
+
+  /* ---- boot timeline ---- */
+
+  const STEPS = [
+    ["Power on", "The CPU's program counter is 0x0000. A 256-byte boot ROM inside the console is mapped over 0x0000–0x00FF, so the cartridge's own first 256 bytes are hidden.", "PC = 0x0000", "--c-entry", false],
+    ["Initialise", "Zero out VRAM, set the background palette, start the audio hardware.", "", "--c-entry", false],
+    ["Scroll the logo", "Copy the 48 logo bytes from cartridge address 0x0104–0x0133 into VRAM as tiles, scroll them down the screen, play the chime.", "reads 0x0104–0x0133", "--c-logo", false],
+    ["Check the logo", "Compare those same 48 bytes against the copy inside the boot ROM. Any mismatch and the console halts here, forever — a black screen and no sound.", "halt on mismatch", "--c-logo", true],
+    ["Check the header checksum", "Run the subtraction loop over 0x0134–0x014C and compare the result with the byte at 0x014D. Mismatch halts the console too.", "halt on mismatch", "--c-sum", true],
+    ["Unmap itself", "Write 0x01 to 0xFF50. The boot ROM disappears from the address space and the cartridge's real bytes at 0x0000–0x00FF become visible. This is irreversible until power off.", "0xFF50 ← 0x01", "--c-hw", false],
+    ["Jump to the cartridge", "PC becomes 0x0100 and the first cartridge instruction executes: NOP, then JP 0x0150 — over the header and into the game.", "PC = 0x0100", "--c-title", false]
+  ];
+
+  const timeline = document.getElementById("timeline");
+  STEPS.forEach(function (s, i) {
+    const step = document.createElement("div");
+    step.className = "tlstep" + (s[4] ? " halt" : "");
+    step.style.setProperty("--fc", "var(" + s[3] + ")");
+
+    const dot = document.createElement("div");
+    dot.className = "dot";
+    dot.textContent = String(i + 1);
+
+    const body = document.createElement("div");
+    body.className = "body";
+
+    const t = document.createElement("span");
+    t.className = "t";
+    t.textContent = s[0];
+
+    const d = document.createElement("span");
+    d.className = "d";
+    d.textContent = s[1];
+
+    body.append(t, d);
+
+    if (s[2]) {
+      const pc = document.createElement("span");
+      pc.className = "pc";
+      pc.textContent = s[2];
+      body.appendChild(pc);
+    }
+
+    step.append(dot, body);
+    timeline.appendChild(step);
+  });
+
+  /* ---- ROM size ladder ---- */
+
+  const ladder = document.getElementById("ladder");
+  for (let n = 0; n <= 8; n++) {
+    const bytes = 32768 * Math.pow(2, n);
+    const row = document.createElement("div");
+    row.className = "lrow" + (n === 0 ? " spot" : "");
+    row.innerHTML =
+      '<span class="raw">0x0' + n + '</span>' +
+      '<span class="bar" style="width:' + (100 * (n + 1) / 9).toFixed(1) + '%"></span>' +
+      '<span class="val">' + (bytes >= 1048576 ? bytes / 1048576 + " MiB" : bytes / 1024 + " KiB") + '</span>' +
+      '<span class="bk">' + (2 << n) + ' banks</span>';
+    ladder.appendChild(row);
+  }
+
+  /* ---- checksum stepper ---- */
+
+  const steps = document.getElementById("steps");
+  let sum = 0;
+  for (let addr = 0x0134; addr <= 0x0140; addr++) {
+    const value = at(addr);
+    const before = sum;
+    const raw = before - value - 1;
+    sum = raw & 0xFF;
+
+    const row = document.createElement("div");
+    row.className = "strow" + (raw < 0 ? " wrapped" : "");
+    const ch = value >= 32 && value < 127 ? String.fromCharCode(value) : ".";
+    row.innerHTML =
+      '<span class="ad">0x' + hex(addr, 4) + '</span>' +
+      '<span class="bv">' + hex(value, 2) + '</span>' +
+      '<span class="ch">' + ch + '</span>' +
+      '<span class="calc">' + hex(before, 2) + " − " + hex(value, 2) + " − 1 = " +
+        (raw < 0 ? "(" + raw + ") wraps to " : "") + "<em>" + hex(sum, 2) + "</em></span>";
+    steps.appendChild(row);
+  }
+
+  let full = 0;
+  for (let addr = 0x0134; addr <= 0x014C; addr++) full = (full - at(addr) - 1) & 0xFF;
+  document.getElementById("stepsTotal").innerHTML =
+    "…continuing to 0x014C gives <b>0x" + hex(full, 2) + "</b>, which is exactly the byte stored at 0x014D. Header valid.";
+})();
+</script>
