@@ -6,6 +6,10 @@ End this step with a Python project you can lint, type-check and test in one
 command, plus the handful of bit-twiddling helpers that every later component
 will be built on top of.
 
+> **Visual companion:** [`bits-and-bytes.html`](bits-and-bytes.html) — bits as
+> rows of squares, the nibble-to-hex mapping, masking as a stencil, two's
+> complement, and a Python appendix on the bitwise operators.
+
 ---
 
 ## Theory
