@@ -7,6 +7,11 @@ and RAM size, and whether the file is intact. By the end of this step you will
 have run your emulator against a real game for the first time — it will not
 execute anything yet, but it will read the game's own description of itself.
 
+> **Visual companion:** [`memory-and-the-cartridge.html`](memory-and-the-cartridge.html)
+> — an interactive header explorer, the address-space map, the boot sequence in
+> order, and why `0x0148` holds a shift rather than a size. Open it first if the
+> difference between an address and its contents is not yet automatic.
+
 ---
 
 ## Theory
