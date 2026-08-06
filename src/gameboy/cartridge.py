@@ -1,10 +1,3 @@
-"""Parsing of the cartridge header at 0x0100-0x014F.
-
-The header is the cartridge's own description of itself: which mapper chip it
-carries, how much ROM and RAM, and two checksums. The console reads it at boot
-to decide whether to run the game at all.
-"""
-
 from dataclasses import dataclass
 from enum import IntEnum
 from pathlib import Path
@@ -25,14 +18,15 @@ ROM_VERSION: Final = 0x014C
 HEADER_CHECKSUM: Final = 0x014D
 GLOBAL_CHECKSUM: Final = slice(0x014E, 0x0150)
 
-# Smallest file that still contains a complete header. Anything shorter cannot
-# be parsed at all, as opposed to merely being an odd size.
+# Smallest file that still contains a complete header.
 HEADER_END: Final = 0x0150
 
 # The byte at ROM_SIZE is a shift, not a size: 32 KiB doubled that many times.
+# https://gbdev.io/pandocs/The_Cartridge_Header.html#0148--rom-size
 SMALLEST_ROM: Final = 32 * 1024
 
-# RAM size is neither a shift nor ordered, so it needs a literal table.
+# RAM size needs a literal table, see:
+# https://gbdev.io/pandocs/The_Cartridge_Header.html#0149--ram-size
 # 0x01 was 2 KiB on some prototypes and is considered unused today.
 RAM_SIZES: Final[dict[int, tuple[int, int]]] = {
     0x00: (0, 0),
@@ -47,7 +41,7 @@ SGB_ENABLED: Final = 0x03
 
 
 class InvalidCartridgeError(Exception):
-    """Raised when a file cannot be interpreted as a cartridge at all."""
+    """Raised when a file cannot be interpreted as a cartridge."""
 
 
 class ColorFlagType(IntEnum):
@@ -76,9 +70,6 @@ class CartridgeType(IntEnum):
 
 @dataclass(frozen=True, slots=True)
 class Header:
-    """Store sizes as real byte counts, not raw header values. The raw byte is
-    an encoding detail; every consumer wants the number."""
-
     title: str
     cartridge_type: CartridgeType
     rom_size: int
