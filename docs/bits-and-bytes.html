@@ -1,4 +1,4 @@
-<title>Bits, Bytes &amp; Hex — a visual primer</title>
+<title>Bits, Bytes and Hex: how a byte becomes two hex digits</title>
 
 <style>
 :root {
@@ -488,13 +488,13 @@ footer {
 <div class="wrap">
 
   <header class="hero">
-    <p class="eyebrow">Game Boy emulator · companion to Step 01</p>
+    <p class="eyebrow">Emulator notes · Game Boy hardware</p>
     <h1>Bits, bytes &amp; hex</h1>
-    <p class="lede">Everything the Sharp SM83 does is eight squares wide. Once you can read a row of squares three ways at once — as a pattern, as a number, as two hex digits — the rest of the CPU stops being mysterious.</p>
+    <p class="lede">Everything the Sharp SM83 does is eight squares wide. Once you can read a row of squares three ways at once (as a pattern, as a number, as two hex digits), the rest of the CPU stops being mysterious.</p>
 
     <div class="card">
       <div>
-        <h3>Try it — click the squares</h3>
+        <h3>Click the squares</h3>
       </div>
       <div class="scroller">
         <div class="bitfig">
@@ -527,7 +527,7 @@ footer {
       </div>
     </div>
 
-    <p>To read a byte as a number, add up the weights of the lit squares. That is the entire conversion — there is no other step.</p>
+    <p>To read a byte as a number, add up the weights of the lit squares. That is the entire conversion.</p>
 
     <div class="card">
       <h3>Worked example · 165</h3>
@@ -540,7 +540,7 @@ footer {
       <div class="sum" data-role="sum" data-value="165"></div>
     </div>
 
-    <p>Eight squares give <span class="m">2<sup>8</sup> = 256</span> distinct patterns, so a byte holds <strong>0 to 255</strong>. Not 0 to 256 — zero is a pattern too, the one with nothing lit.</p>
+    <p>Eight squares give <span class="m">2<sup>8</sup> = 256</span> distinct patterns, so a byte holds <strong>0 to 255</strong>. Zero is one of those patterns, the one with nothing lit.</p>
 
     <div class="note"><b>Why the leftmost square is called bit 7, not bit 1.</b> Bits are numbered by the exponent of their weight: the square worth <span class="m">2⁰ = 1</span> is bit 0, and the one worth <span class="m">2⁷ = 128</span> is bit 7. So numbering runs right-to-left while reading runs left-to-right. Every hardware document you will read uses this convention, including Pan Docs.</div>
   </section>
@@ -585,21 +585,21 @@ footer {
     </div>
 
     <p>Hexadecimal is base 16, and <span class="m">16 = 2⁴</span>. That single fact means one hex digit corresponds to <strong>exactly four squares</strong>, always, with no carrying between them. Decimal is base 10, and 10 is not a power of two, so a decimal digit maps to nothing in particular.</p>
-    <p>The <span class="m">0x</span> prefix is not part of the number. It is just Python (and C, and Ruby) telling you “read what follows as base 16”. <span class="m">0xFF</span>, <span class="m">255</span> and <span class="m">0b11111111</span> are three spellings of one value — <span class="m">0xFF == 255</span> is <span class="m">True</span>.</p>
+    <p>The <span class="m">0x</span> prefix is not part of the number. It is just Python (and C, and Ruby) telling you “read what follows as base 16”. <span class="m">0xFF</span>, <span class="m">255</span> and <span class="m">0b11111111</span> are three spellings of one value. In Python, <span class="m">0xFF == 255</span> is <span class="m">True</span>.</p>
   </section>
 
   <section>
     <div class="head"><span class="num">03</span><h2>The nibble: four squares, sixteen states, one digit</h2></div>
-    <p>Four squares have <span class="m">2⁴ = 16</span> possible patterns. Base 16 has 16 digits. So they map one-to-one, perfectly, with nothing left over. Four bits are called a <em class="term">nibble</em> — half a byte, and yes, that is the real name.</p>
-    <p>Here is the complete mapping. It is the only table on this page worth memorising, and you will absorb it in a week without trying:</p>
+    <p>Four squares have <span class="m">2⁴ = 16</span> possible patterns. Base 16 has 16 digits. So they map one-to-one, perfectly, with nothing left over. Four bits are called a <em class="term">nibble</em>, half a byte, and yes, that is the real name.</p>
+    <p>The complete mapping, and the only table here worth memorising:</p>
 
     <div class="card">
       <div class="nibbles" id="nibbleTable"></div>
     </div>
 
-    <p>Notice where the letters come from: we need single characters for ten through fifteen, so A=10, B=11, C=12, D=13, E=14, F=15. <strong>F is not a letter in a numeric context — it is the digit fifteen</strong>, and fifteen is what four lit squares add up to (8+4+2+1).</p>
+    <p>The letters exist because ten through fifteen need single characters: A=10, B=11, C=12, D=13, E=14, F=15. <strong>In a numeric context F is the digit fifteen</strong>, and fifteen is what four lit squares add up to (8+4+2+1).</p>
 
-    <p>Now the question you asked. A byte is two nibbles, so it is <strong>always exactly two hex digits</strong>: the left nibble becomes the left digit, the right nibble the right digit.</p>
+    <p>A byte is two nibbles, so it is <strong>always exactly two hex digits</strong>: the left nibble becomes the left digit, the right nibble the right digit.</p>
 
     <div class="card">
       <h3>0xFF · every square lit</h3>
@@ -636,7 +636,7 @@ footer {
 
   <section>
     <div class="head"><span class="num">04</span><h2>Sixteen bits: two bytes, four digits</h2></div>
-    <p>Addresses on the Game Boy are 16-bit, so the address space runs <span class="m">0x0000</span> to <span class="m">0xFFFF</span> — that is <span class="m">2¹⁶ = 65,536</span> locations. Same rules, just a longer row: four nibbles, four hex digits.</p>
+    <p>Addresses on the Game Boy are 16-bit, so the address space runs <span class="m">0x0000</span> to <span class="m">0xFFFF</span>, which is <span class="m">2¹⁶ = 65,536</span> locations. Same rules, just a longer row: four nibbles, four hex digits.</p>
 
     <div class="card">
       <h3>0x1234</h3>
@@ -656,12 +656,12 @@ footer {
 
     <p>Splitting and joining is pure square-shuffling. To get the high byte you shift the row eight places right, dropping the low half off the end. To get the low byte you mask with <span class="m">0xFF</span>, which is section 05.</p>
 
-    <div class="note"><b>This is why register pairs exist.</b> The CPU has 8-bit registers <span class="m">B</span> and <span class="m">C</span>, but instructions can use them together as a 16-bit <span class="m">BC</span>. That is not a separate register — it is literally <span class="m">B</span>'s eight squares placed to the left of <span class="m">C</span>'s eight squares. <span class="m">join_bytes(B, C)</span>.</div>
+    <div class="note"><b>This is why register pairs exist.</b> The CPU has 8-bit registers <span class="m">B</span> and <span class="m">C</span>, but instructions can use them together as a 16-bit <span class="m">BC</span>. <span class="m">BC</span> is literally <span class="m">B</span>'s eight squares placed to the left of <span class="m">C</span>'s eight squares. <span class="m">join_bytes(B, C)</span>.</div>
   </section>
 
   <section>
     <div class="head"><span class="num">05</span><h2>Masking is a stencil</h2></div>
-    <p>You said you understand masking, so here it is purely as a picture. <span class="m">AND</span> lights a square in the result only if it is lit in <em>both</em> input rows. Put a row of eight lit squares underneath a wider value, and everything sticking out above gets cut away.</p>
+    <p><span class="m">AND</span> lights a square in the result only if it is lit in <em>both</em> input rows. Put a row of eight lit squares underneath a wider value, and everything sticking out above gets cut away.</p>
 
     <div class="card">
       <h3>0x1FF &amp; 0xFF → 0xFF</h3>
@@ -685,12 +685,12 @@ footer {
           </div>
         </div>
       </div>
-      <p class="sum">The ninth square had nothing above it in the stencil, so it went dark. 511 became 255 — the carry was thrown away, exactly as an 8-bit register would.</p>
+      <p class="sum">The ninth square had nothing above it in the stencil, so it went dark. 511 became 255. The carry was thrown away, exactly as an 8-bit register would.</p>
     </div>
 
     <p>This is why <span class="m">&amp; 0xFF</span> is mandatory in Python. In C, a <span class="m">uint8_t</span> is physically eight squares wide and the ninth has nowhere to go. In Python an integer grows as many squares as it needs, forever, so <span class="m">0xFF + 1</span> quietly becomes a nine-square number instead of wrapping to zero.</p>
 
-    <div class="ruby"><b>Same in Ruby.</b> <span class="m">Integer</span> is unbounded there too, so this is not a Python quirk you have to unlearn — it is an <i>emulation</i> quirk. A C emulator gets the truncation free from the type system; we have to ask for it, on every single arithmetic result that lands in a register.</div>
+    <div class="ruby"><b>Same in Ruby.</b> <span class="m">Integer</span> is unbounded there too, so this is an <i>emulation</i> quirk rather than a Python one. A C emulator gets the truncation free from the type system; we have to ask for it, on every single arithmetic result that lands in a register.</div>
 
     <div class="split">
       <div class="card">
@@ -712,7 +712,7 @@ footer {
 
   <section>
     <div class="head"><span class="num">06</span><h2>Signed values: one square changes its mind</h2></div>
-    <p>A few instructions — <span class="m">JR</span>, <span class="m">ADD SP,e8</span> — need to jump <em>backwards</em>, so their operand byte has to represent negative numbers. There are no extra squares available. The trick is to reinterpret one that already exists.</p>
+    <p>A few instructions (<span class="m">JR</span>, <span class="m">ADD SP,e8</span>) need to jump <em>backwards</em>, so their operand byte has to represent negative numbers. There are no extra squares available. The trick is to reinterpret one that already exists.</p>
     <p>In <strong>two's complement</strong>, the leftmost square keeps its magnitude but flips its sign: instead of being worth <span class="m">+128</span>, it is worth <span class="m">−128</span>. Every other square is unchanged.</p>
 
     <div class="split">
@@ -734,7 +734,7 @@ footer {
       </div>
     </div>
 
-    <p>Same squares. Same stored byte. The only thing that changed is which weight we assign to the top square — and that is a decision made by the <em>instruction</em>, not by the memory. The byte itself has no idea whether it is signed.</p>
+    <p>The squares are the same and so is the stored byte. The only thing that changed is which weight we assign to the top square, and that is a decision made by the <em>instruction</em> rather than the memory. The byte itself has no idea whether it is signed.</p>
 
     <div class="card">
       <h3>The whole range</h3>
@@ -755,14 +755,14 @@ footer {
       <p class="sum">The top square is the <b>sign bit</b>: off means zero-or-positive, on means negative. Nothing above <span class="m">0x7F</span> is positive when read as signed.</p>
     </div>
 
-    <p>Look at the Unsigned and Signed columns for any row where the top square is lit: the difference is always exactly <strong>256</strong>. That is where the implementation shortcut comes from — if bit 7 is set, subtract 256. It is not a rule to memorise, it is just the arithmetic of turning one <span class="m">+128</span> into a <span class="m">−128</span>, a swing of 256.</p>
+    <p>Look at the Unsigned and Signed columns for any row where the top square is lit: the difference is always exactly <strong>256</strong>. That is where the implementation shortcut comes from: if bit 7 is set, subtract 256. It is the arithmetic of turning one <span class="m">+128</span> into a <span class="m">−128</span>, a swing of 256.</p>
 
     <div class="note"><b>Why two's complement and not a plain sign flag?</b> Because addition keeps working untouched. <span class="m">0xFF + 0x01</span> overflows to <span class="m">0x00</span>, and read as signed that is <span class="m">−1 + 1 = 0</span>. Correct, with no special case. The CPU adds the same way whether you meant the bytes as signed or not, which is why the hardware needs no separate signed-add instruction.</div>
   </section>
 
   <section>
     <div class="head"><span class="num">07</span><h2>Wrapping: the odometer</h2></div>
-    <p>Eight squares cannot count past 255, so they roll over like a car odometer. This is not an error condition — it is the defined, relied-upon behaviour, and the CPU records the roll-over in the <strong>carry flag</strong> so the next instruction can react.</p>
+    <p>Eight squares cannot count past 255, so they roll over like a car odometer. This is defined, relied-upon behaviour, and the CPU records the roll-over in the <strong>carry flag</strong> so the next instruction can react.</p>
 
     <div class="card">
       <div class="odo">
@@ -784,7 +784,7 @@ footer {
 
   <section>
     <div class="head"><span class="num">08</span><h2>Little-endian: the order on the shelf</h2></div>
-    <p>Everything above describes a 16-bit value as a single row, left to right. But memory only stores <em>bytes</em>, one per address, so a 16-bit value has to be split across two consecutive addresses — and the Game Boy puts the <strong>low byte first</strong>.</p>
+    <p>Everything above describes a 16-bit value as a single row, left to right. But memory only stores <em>bytes</em>, one per address, so a 16-bit value has to be split across two consecutive addresses, and the Game Boy puts the <strong>low byte first</strong>.</p>
 
     <div class="card">
       <h3>Writing 0x1234 to address 0xC000</h3>
@@ -799,11 +799,11 @@ footer {
 
     <p>The value you <em>write down</em> is <span class="m">0x1234</span>, high digit first, because that is how humans write numbers. The value <em>in memory</em> is <span class="m">34 12</span>. Both are correct; they are different views. The bug you will actually hit is reading a byte pair in the order it appears in a hex dump and getting <span class="m">0x3412</span>.</p>
 
-    <div class="note"><b>Where you will meet it first.</b> Every instruction that takes a 16-bit operand — <span class="m">JP a16</span>, <span class="m">LD BC,d16</span>, <span class="m">CALL a16</span> — stores that operand little-endian in the ROM, immediately after the opcode. So the fetch is always: opcode, then low byte, then high byte. The stack works the same way.</div>
+    <div class="note"><b>Where it shows up first.</b> Every instruction that takes a 16-bit operand (<span class="m">JP a16</span>, <span class="m">LD BC,d16</span>, <span class="m">CALL a16</span>) stores that operand little-endian in the ROM, immediately after the opcode. So the fetch is always: opcode, then low byte, then high byte. The stack works the same way.</div>
   </section>
 
   <section>
-    <div class="head"><span class="num">APX</span><h2>Appendix — doing all this in Python</h2></div>
+    <div class="head"><span class="num">APX</span><h2>Appendix: doing all this in Python</h2></div>
     <p>The pictures above are the mental model. This is the keyboard-level reference: the operators, the conversions, and the four things that will bite you. Everything here was run against Python 3.14 before being written down.</p>
 
     <h3>A · The six operators</h3>
@@ -811,24 +811,24 @@ footer {
       <table class="data">
         <thead><tr><th>Op</th><th>Name</th><th>Example</th><th>Result</th><th>What you use it for</th></tr></thead>
         <tbody>
-          <tr><td>&amp;</td><td>AND</td><td>0xA5 &amp; 0x0F</td><td>0x05</td><td>Masking — keep only these squares</td></tr>
+          <tr><td>&amp;</td><td>AND</td><td>0xA5 &amp; 0x0F</td><td>0x05</td><td>Masking: keep only these squares</td></tr>
           <tr><td>|</td><td>OR</td><td>0xA0 | 0x05</td><td>0xA5</td><td>Setting squares on</td></tr>
           <tr><td>^</td><td>XOR</td><td>0xFF ^ 0x0F</td><td>0xF0</td><td>Toggling; also <span class="m">XOR A</span> to zero a register</td></tr>
-          <tr><td>~</td><td>NOT</td><td>~0x08</td><td class="neg">-9</td><td>Building inverse masks — <em>always re-mask</em></td></tr>
+          <tr><td>~</td><td>NOT</td><td>~0x08</td><td class="neg">-9</td><td>Building inverse masks; <em>always re-mask</em></td></tr>
           <tr><td>&lt;&lt;</td><td>shift left</td><td>1 &lt;&lt; 3</td><td>0x08</td><td>Building a single-bit mask; ×2</td></tr>
           <tr><td>&gt;&gt;</td><td>shift right</td><td>0x1234 &gt;&gt; 8</td><td>0x12</td><td>Extracting the high byte; ÷2</td></tr>
         </tbody>
       </table>
     </div>
-    <p>These are the same six you already know from Ruby, with the same spellings. What differs is everything around them — literals, formatting, and the byte containers in section D.</p>
+    <p>These are the same six you already know from Ruby, with the same spellings. What differs is everything around them: literals, formatting, and the byte containers in section D.</p>
 
     <h3>B · Writing and printing values</h3>
     <div class="stack">
       <pre class="code"><span class="c"># All four literals below are the same integer. Pick by intent:</span>
 255
-0xFF          <span class="c"># hex — default for registers, opcodes, addresses</span>
-0b1111_1111   <span class="c"># binary — when the pattern matters more than the value</span>
-0o377         <span class="c"># octal — you will never want this</span>
+0xFF          <span class="c"># hex: default for registers, opcodes, addresses</span>
+0b1111_1111   <span class="c"># binary: when the pattern matters more than the value</span>
+0o377         <span class="c"># octal: never useful here</span>
 
 <span class="c"># Underscores are legal anywhere in a numeric literal. Use them:</span>
 0b1010_0101   <span class="c"># nibble-grouped, reads like the diagrams above</span>
@@ -838,7 +838,7 @@ footer {
 int("FF", 16)      <span class="out">→ 255</span>
 int("0xFF", 0)     <span class="out">→ 255   # base 0 honours the prefix</span></pre>
 
-      <pre class="code"><span class="c"># Formatting. f-strings take a format spec after the colon —</span>
+      <pre class="code"><span class="c"># Formatting. f-strings take a format spec after the colon.</span>
 <span class="c"># this is the one piece of syntax worth memorising today.</span>
 v = 0xA5
 
@@ -855,11 +855,11 @@ f"A:{a:02X} F:{f:02X} BC:{bc:04X} PC:{pc:04X}"
 hex(165)       <span class="out">→ '0xa5'</span>
 bin(165)       <span class="out">→ '0b10100101'</span></pre>
     </div>
-    <div class="ruby"><b>vs. Ruby.</b> Ruby's <span class="m">255.to_s(2)</span> and <span class="m">"%02X" % v</span> both exist in Python as <span class="m">format()</span> and <span class="m">%</span>, but f-strings have replaced them in modern code. Note <span class="m">02X</span> is the width <em>including</em> padding, and that <span class="m">#</span> makes <span class="m">0x</span> count toward that width — <span class="m">f"{v:#04x}"</span> gives four characters total, of which two are the prefix.</div>
+    <div class="ruby"><b>vs. Ruby.</b> Ruby's <span class="m">255.to_s(2)</span> and <span class="m">"%02X" % v</span> both exist in Python as <span class="m">format()</span> and <span class="m">%</span>, but f-strings have replaced them in modern code. Note <span class="m">02X</span> is the width <em>including</em> padding, and that <span class="m">#</span> makes <span class="m">0x</span> count toward that width, so <span class="m">f"{v:#04x}"</span> gives four characters total, of which two are the prefix.</div>
 
-    <h3>C · Signed conversions — your question, three ways</h3>
+    <h3>C · Signed conversions, three ways</h3>
     <p>Turning the byte <span class="m">0xFF</span> into <span class="m">−1</span> is “if the top square is lit, subtract 256”. All three of these do exactly that:</p>
-    <pre class="code"><span class="c"># 1. Explicit. Write this one first — it is the diagram in section 06,</span>
+    <pre class="code"><span class="c"># 1. Explicit. Write this one first: it is the diagram in section 06,</span>
 <span class="c">#    transcribed. You should be able to derive it from scratch.</span>
 def to_signed8(value: int) -> int:
     return value - 0x100 if value &amp; 0x80 else value
@@ -883,10 +883,10 @@ int.from_bytes(bytes([value]), "little", signed=True)   <span class="out">→ -1
 <span class="c"># So a relative jump needs no special casing on the way in:</span>
 offset = to_signed8(rom[pc + 1])     <span class="c"># 0xFE → -2</span>
 pc = (pc + 2 + offset) &amp; 0xFFFF      <span class="c"># wraps correctly either direction</span></pre>
-    <div class="note"><b>Sixteen bits works identically</b>, with <span class="m">0x8000</span> as the sign bit and <span class="m">0x10000</span> as the subtrahend. You will barely need it — the SM83 has no signed 16-bit operations — but the pattern generalises to any width.</div>
+    <div class="note"><b>Sixteen bits works identically</b>, with <span class="m">0x8000</span> as the sign bit and <span class="m">0x10000</span> as the subtrahend. The SM83 has no signed 16-bit operations, so it rarely comes up, but the pattern generalises to any width.</div>
 
     <h3>D · Bytes, bytearray, and reading the ROM</h3>
-    <p>A ROM file is <span class="m">bytes</span> (immutable); RAM is <span class="m">bytearray</span> (mutable). Both are sequences of plain <span class="m">int</span>s in 0–255 — which means the container enforces the 8-bit range for you on write, but arithmetic still needs its mask.</p>
+    <p>A ROM file is <span class="m">bytes</span> (immutable); RAM is <span class="m">bytearray</span> (mutable). Both are sequences of plain <span class="m">int</span>s in 0–255, which means the container enforces the 8-bit range for you on write, but arithmetic still needs its mask.</p>
     <pre class="code">rom = Path("tetris.gb").read_bytes()   <span class="c"># bytes, immutable</span>
 wram = bytearray(0x2000)               <span class="c"># 8 KiB of zeroes, mutable</span>
 
@@ -896,19 +896,19 @@ rom[0x0100:0x0104] <span class="out">→ b'\x00\xc3\x50\x01'  # a slice gives by
 wram[0x0000] = 0x42          <span class="c"># fine</span>
 wram[0x0000] = 0x100         <span class="bad">→ ValueError: byte must be in range(0, 256)</span>
 
-<span class="c"># Little-endian 16-bit read — the byte order is a parameter, not your problem:</span>
+<span class="c"># Little-endian 16-bit read. Byte order is a parameter, not your problem:</span>
 int.from_bytes(rom[addr:addr + 2], "little")     <span class="out">→ 0x0150</span>
 
 <span class="c"># ...or spelled out, which is what the CPU actually does:</span>
 low, high = rom[addr], rom[addr + 1]
 (high &lt;&lt; 8) | low</pre>
-    <div class="ruby"><b>vs. Ruby.</b> This is the biggest day-to-day difference. Ruby's <span class="m">String</span> doubles as a byte buffer and <span class="m">str[0]</span> gives you back a one-character <span class="m">String</span>; Python separates text (<span class="m">str</span>) from bytes entirely, and indexing <span class="m">bytes</span> gives an <span class="m">int</span>. That <span class="m">int</span> is exactly what you want here — no <span class="m">.ord</span>, no <span class="m">.unpack</span>.</div>
+    <div class="ruby"><b>vs. Ruby.</b> This is the biggest day-to-day difference. Ruby's <span class="m">String</span> doubles as a byte buffer and <span class="m">str[0]</span> gives you back a one-character <span class="m">String</span>; Python separates text (<span class="m">str</span>) from bytes entirely, and indexing <span class="m">bytes</span> gives an <span class="m">int</span>. That <span class="m">int</span> is exactly what you want here, with no <span class="m">.ord</span> or <span class="m">.unpack</span>.</div>
 
     <h3>E · Four things that will bite you</h3>
     <div class="stack">
       <pre class="code"><span class="c">── 1. ~ returns a negative number ──────────────────────────</span>
 ~0x08          <span class="bad">→ -9      # not 0xF7, as C would suggest</span>
-~0x08 &amp; 0xFF   <span class="out">→ 247     # 0xF7 — always re-mask after ~</span>
+~0x08 &amp; 0xFF   <span class="out">→ 247     # 0xF7. Always re-mask after ~</span>
 
 <span class="c">It still works unmasked inside an AND (v &amp; ~0x08 is correct),</span>
 <span class="c">but the intermediate will confuse you in a debugger. Mask it.</span></pre>
@@ -924,7 +924,7 @@ low, high = rom[addr], rom[addr + 1]
 (1 &lt;&lt; 2) + 3   <span class="out">→ 7       # parenthesise, always</span>
 
 <span class="c">The good news, and a genuine difference from C:</span>
-<span class="c">&amp; binds TIGHTER than ==, so this needs no parentheses —</span>
+<span class="c">&amp; binds TIGHTER than ==, so this needs no parentheses:</span>
 v &amp; 0x0F == 5  <span class="out">→ parses as (v &amp; 0x0F) == 5, which is what you meant</span>
 <span class="c">In C that same line means v &amp; (0x0F == 5). Python fixed it.</span></pre>
 
@@ -938,7 +938,7 @@ isinstance(True, int)  <span class="out">→ True</span>
     </div>
 
     <h3>F · Handy standard-library extras</h3>
-    <pre class="code">(0xA5).bit_count()    <span class="out">→ 4    # lit squares — 3.10+; handy for parity flags</span>
+    <pre class="code">(0xA5).bit_count()    <span class="out">→ 4    # lit squares; 3.10+, handy for parity flags</span>
 (0xA5).bit_length()   <span class="out">→ 8    # position of the highest lit square</span>
 (-1).to_bytes(1, "little", signed=True).hex()   <span class="out">→ 'ff'</span>
 
@@ -966,11 +966,11 @@ isinstance(True, int)  <span class="out">→ True</span>
         </tbody>
       </table>
     </div>
-    <p>That last row is the one you have not met yet. The SM83 has a <strong>half-carry</strong> flag that records a carry out of the low nibble, used by the <span class="m">DAA</span> instruction for decimal arithmetic. It is included here because it is the clearest possible argument for the nibble being a real, physical division of the byte and not just a notation convenience — the hardware has a wire for it.</p>
+    <p>The last row needs a word of explanation. The SM83 has a <strong>half-carry</strong> flag that records a carry out of the low nibble, used by the <span class="m">DAA</span> instruction for decimal arithmetic. The nibble is a real, physical division of the byte: the hardware has a wire for it.</p>
   </section>
 
   <footer>
-    <p>Companion to <span class="m">docs/STEP_01.md</span>. If a square in <span class="m">bits.py</span> ever ends up somewhere you did not expect, come back and draw the row — the bug is almost always a missing mask or a swapped byte order.</p>
+    <p>When a value ends up somewhere unexpected, draw the row. The bug is almost always a missing mask or a swapped byte order.</p>
   </footer>
 
 </div>
