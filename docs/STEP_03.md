@@ -150,6 +150,7 @@ order should collapse into two functions:
 def read16(self, address: int) -> int:
     return join_bytes(self.read(address + 1), self.read(address))
 
+
 def write16(self, address: int, value: int) -> None:
     self.write(address, low_byte(value))
     self.write(address + 1, high_byte(value))
