@@ -3,6 +3,8 @@ from enum import IntEnum
 from pathlib import Path
 from typing import Final, Self
 
+from gameboy import memory_map
+
 ENTRY_POINT: Final = 0x0100
 LOGO: Final = slice(0x0104, 0x0134)
 TITLE: Final = slice(0x0134, 0x0143)
@@ -130,10 +132,23 @@ def parse_header(rom: bytes) -> Header:
     )
 
 
+# Writing `0x02` to `0x2100` on an MBC1 cartridge does not store a byte, *BUT*
+# it tells the mapper "from now on, when the CPU reads `0x4000–0x7FFF`, serve
+# bank 2".
 @dataclass(frozen=True, slots=True)
 class Cartridge:
     raw_bytes: bytes
     header: Header
+
+    def read(self, address: int) -> int:
+        # Check if addressing external RAM, since ROM_ONLY has none, for now:
+        if address in memory_map.ROM:
+            return self.raw_bytes[address]
+
+        return memory_map.OPEN_BUS
+
+    # This will be the command interface to MBC:
+    def write(self, address: int, value: int) -> None: ...
 
     @classmethod
     def from_bytes(cls, data: bytes) -> Self:
