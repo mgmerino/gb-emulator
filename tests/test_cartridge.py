@@ -7,9 +7,9 @@ keyword overrides for whichever field a test is about.
 import os
 from pathlib import Path
 
-from gameboy import memory_map
 import pytest
 
+from gameboy import memory_map
 from gameboy.cartridge import (
     CARTRIDGE_TYPE,
     CGB_FLAG,
@@ -260,6 +260,25 @@ def test_read_outside_rom_returns_open_bus(cartridge: Cartridge) -> None:
 def test_read_is_total(cartridge: Cartridge) -> None:
     for address in range(0x10000):
         assert 0 <= cartridge.read(address) <= 0xFF
+
+
+def test_write_does_not_change_what_read_returns(cartridge: Cartridge) -> None:
+    """Writes are dropped today and become MBC commands in Step 15.
+
+    `frozen=True` plus `bytes` means this cannot fail right now. It earns its
+    keep in Step 15, when write starts doing something and must still leave
+    `raw_bytes` alone.
+    """
+    cartridge.write(0x0000, 0xAF)
+    cartridge.write(0x2100, 0x01)  # MBC1 ROM-bank register
+    cartridge.write(0x7FFF, 0xAF)
+    cartridge.write(0xA000, 0xAF)
+
+    assert cartridge.read(0x0000) == 0xAA
+    assert cartridge.read(0x1234) == 0xBB
+    assert cartridge.read(0x4000) == 0xCC
+    assert cartridge.read(0x7FFF) == 0xDD
+    assert cartridge.read(0xA000) == memory_map.OPEN_BUS
 
 
 # --- optional: run against a real cartridge -----------
