@@ -1,3 +1,9 @@
+"""The DMG address map, in address order.
+
+A leaf module: it imports nothing from the package, so both `memory` and
+`cartridge` can depend on it without a cycle.
+"""
+
 from typing import Final
 
 # Cartridge ROM full range
