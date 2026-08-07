@@ -20,3 +20,6 @@ wheels/
 *.bin
 *.sav
 *.state
+
+# transient docs
+docs/corpus
