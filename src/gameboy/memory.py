@@ -53,7 +53,33 @@ class Bus:
             case _:
                 return memory_map.OPEN_BUS
 
-    def write(self, address: int, value: int) -> None: ...
+    def write(self, address: int, value: int) -> None:
+        masked_address = bits.u16(address)
+        masked_value = bits.u8(value)
+        match masked_address:
+            case _ if (
+                masked_address in memory_map.ROM
+                or masked_address in memory_map.EXTERNAL_RAM
+            ):
+                return self.cartridge.write(masked_address, masked_value)
+            case _ if masked_address in memory_map.WRAM:
+                self.wram[masked_address - memory_map.WRAM.start] = masked_value
+            case _ if masked_address in memory_map.VRAM:
+                self.vram[masked_address - memory_map.VRAM.start] = masked_value
+            case _ if masked_address in memory_map.ECHO_RAM:
+                self.write(masked_address - memory_map.ECHO_OFFSET, masked_value)
+            case _ if masked_address in memory_map.OAM:
+                self.oam[masked_address - memory_map.OAM.start] = masked_value
+            case _ if masked_address in memory_map.IO:
+                self.io[masked_address - memory_map.IO.start] = masked_value
+            case _ if masked_address in memory_map.HRAM:
+                self.hram[masked_address - memory_map.HRAM.start] = masked_value
+            case memory_map.INTERRUPT_ENABLE:
+                self.ie = masked_value
+            case _ if masked_address in memory_map.PROHIBITED:
+                return
+            case _:
+                return
 
     def read16(self, address: int) -> int:
         return bits.join_bytes(self.read(address + 1), self.read(address))
