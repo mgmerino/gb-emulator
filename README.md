@@ -13,6 +13,7 @@ with the theory, the tasks and the acceptance criteria.
 | 01 | [Project scaffolding & bit primitives](docs/STEP_01.md) | done |
 | 02 | [Cartridge & ROM header](docs/STEP_02.md) | done |
 | 03 | [The memory bus](docs/STEP_03.md) | in progress |
+| 04 | [CPU state & the fetch-decode-execute skeleton](docs/STEP_04.md) | next |
 
 ## Requirements
 
