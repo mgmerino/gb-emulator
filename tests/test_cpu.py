@@ -1,0 +1,171 @@
+import pytest
+
+from gameboy.cpu import Registers
+
+
+def test_pair_composes_from_its_halves(registers: Registers) -> None:
+    registers.b = 0x23
+    registers.c = 0xEE
+
+    assert registers.bc == 0x23EE
+
+
+def test_pair_decomposes_into_its_halves(registers: Registers) -> None:
+    registers.bc = 0x109A
+
+    assert registers.b == 0x10
+    assert registers.c == 0x9A
+
+
+@pytest.mark.parametrize(
+    "pair,high,low", [("bc", 0x23, 0xEA), ("de", 0x72, 0x34), ("hl", 0x13, 0x10)]
+)
+def test_every_pair_composes(
+    registers: Registers, pair: str, high: int, low: int
+) -> None:
+
+    setattr(registers, pair, (high << 8) | low)
+
+    assert getattr(registers, pair[0]) == high
+    assert getattr(registers, pair[1]) == low
+
+
+def test_af_composes_from_a_and_the_flag_byte(registers: Registers) -> None:
+    registers.a = 0x10
+    registers.f = 0x90
+
+    assert registers.af == 0x1090
+
+
+def test_flag_byte_is_zero_when_no_flag_is_set(registers: Registers) -> None:
+    assert registers.f == 0x00
+
+
+def test_flag_byte_is_f0_when_every_flag_is_set(registers: Registers) -> None:
+    registers.z_flag = True
+    registers.n_flag = True
+    registers.h_flag = True
+    registers.c_flag = True
+
+    assert registers.f == 0xF0
+
+
+@pytest.mark.parametrize(
+    "flag,bit",
+    [("z_flag", 0x80), ("n_flag", 0x40), ("h_flag", 0x20), ("c_flag", 0x10)],
+)
+def test_each_flag_lands_in_its_own_bit(
+    registers: Registers, flag: str, bit: int
+) -> None:
+    setattr(registers, flag, True)
+
+    assert registers.f == bit
+
+
+def test_flag_byte_unpacks_into_the_four_flags(registers: Registers) -> None:
+    registers.af = 0x10BA
+    # from the low byte, we only take the first nibble 0xB, which translates to
+    # 0b1011, so z = true, n = false, h = true, c = true
+
+    assert registers.a == 0x10
+    assert registers.f == 0xB0  # The low nibble is lost
+    assert registers.z_flag
+    assert not registers.n_flag
+    assert registers.h_flag
+    assert registers.c_flag
+
+
+def test_flag_byte_round_trips(registers: Registers) -> None:
+    registers.f = 0xC0
+
+    assert registers.f == 0xC0
+
+
+def test_flag_low_nibble_has_no_storage(registers: Registers) -> None:
+    registers.f = 0xFF
+
+    assert registers.f == 0xF0
+
+
+def test_af_low_nibble_has_no_storage(registers: Registers) -> None:
+    registers.af = 0x10BA
+
+    assert registers.af == 0x10B0
+
+
+_FIRST_TOO_WIDE = [
+    ("a", 0x100),
+    ("b", 0x100),
+    ("c", 0x100),
+    ("d", 0x100),
+    ("e", 0x100),
+    ("h", 0x100),
+    ("l", 0x100),
+    ("f", 0x100),
+    ("sp", 0x10000),
+    ("pc", 0x10000),
+    ("af", 0x10000),
+    ("bc", 0x10000),
+    ("de", 0x10000),
+    ("hl", 0x10000),
+]
+
+
+@pytest.mark.parametrize("name,value", _FIRST_TOO_WIDE)
+def test_register_rejects_a_value_wider_than_itself(
+    registers: Registers, name: str, value: int
+) -> None:
+    with pytest.raises(ValueError):
+        setattr(registers, name, value)
+
+
+@pytest.mark.parametrize("name", [name for name, _ in _FIRST_TOO_WIDE])
+def test_register_rejects_a_negative_value(registers: Registers, name: str) -> None:
+    with pytest.raises(ValueError):
+        setattr(registers, name, -1)
+
+
+@pytest.mark.parametrize("name", [name for name, _ in _FIRST_TOO_WIDE])
+def test_register_rejects_a_non_integer(registers: Registers, name: str) -> None:
+    with pytest.raises(ValueError):
+        setattr(registers, name, "0x10")
+
+
+def test_widest_accepted_value_is_stored(registers: Registers) -> None:
+    # The other side of the boundary: one below each rejected value is fine.
+    registers.a = 0xFF
+    registers.pc = 0xFFFF
+    registers.hl = 0xFFFF
+
+    assert registers.a == 0xFF
+    assert registers.pc == 0xFFFF
+    assert registers.hl == 0xFFFF
+
+
+def test_a_rejected_pair_assignment_leaves_both_halves_untouched(
+    registers: Registers,
+) -> None:
+    # The guard runs before the property setter, so nothing is half-written.
+    registers.hl = 0xBEEF
+
+    with pytest.raises(ValueError):
+        registers.hl = 0x10000
+
+    assert registers.h == 0xBE
+    assert registers.l == 0xEF
+
+
+def test_registers_default_to_zero(registers: Registers) -> None:
+    assert registers.a == 0
+    assert registers.b == 0
+    assert registers.c == 0
+    assert registers.d == 0
+    assert registers.e == 0
+    assert registers.h == 0
+    assert registers.l == 0
+    assert registers.sp == 0
+    assert registers.pc == 0
+    assert registers.z_flag == False
+    assert registers.n_flag == False
+    assert registers.h_flag == False
+    assert registers.c_flag == False

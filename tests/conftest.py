@@ -9,6 +9,7 @@ their name in a test's parameter list, which is pytest's answer to RSpec's
 import pytest
 
 from gameboy.cartridge import Cartridge
+from gameboy.cpu import Registers
 from gameboy.memory import Bus
 
 
@@ -78,3 +79,8 @@ def fake_bus() -> tuple[Bus, FakeCartridge]:
     """
     device = FakeCartridge()
     return Bus(device), device
+
+
+@pytest.fixture
+def registers() -> Registers:
+    return Registers()
