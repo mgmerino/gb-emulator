@@ -1,6 +1,7 @@
 """CLI entry point: `python -m gameboy <rom>` prints a cartridge summary."""
 
 import argparse
+from itertools import batched
 from pathlib import Path
 
 from gameboy.cartridge import (
@@ -9,6 +10,12 @@ from gameboy.cartridge import (
     compute_global_checksum,
     compute_header_checksum,
 )
+from gameboy.memory import Bus, MemoryDevice
+
+type Row = tuple[int, int, str]
+BYTES_PER_ROW = 16
+# 16 groups of two hex digits, 15 separators, plus the extra space at the gutter.
+HEX_WIDTH = BYTES_PER_ROW * 3 - 1 + 1
 
 
 def format_size(size: int) -> str:
@@ -17,6 +24,10 @@ def format_size(size: int) -> str:
     if size >= 1024 * 1024:
         return f"{size // (1024 * 1024)} MiB"
     return f"{size // 1024} KiB"
+
+
+def parse_address(text: str) -> int:
+    return int(text, 0)  # base 0 means "infer from the prefix"
 
 
 def describe(cartridge: Cartridge) -> str:
@@ -64,11 +75,35 @@ def describe(cartridge: Cartridge) -> str:
     return "\n".join(lines)
 
 
+def printable(value: int) -> str:
+    return chr(value) if 0x20 <= value < 0x7F else "."
+
+
+def hex_field(values: list[int]) -> str:
+    left = " ".join(f"{value:02X}" for value in values[:8])
+    right = " ".join(f"{value:02X}" for value in values[8:])
+    return f"{left}  {right}"
+
+
+def dump(bus: MemoryDevice, start: int, length: int) -> str:
+    lines = []
+
+    for chunk in batched(range(start, start + length), BYTES_PER_ROW):
+        row = [bus.read(address) for address in chunk]
+        text = "".join(printable(value) for value in row)
+
+        lines.append(f"{chunk[0]:04X}: {hex_field(row):<{HEX_WIDTH}}  {text}")
+
+    return "\n".join(lines)
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(
         prog="gameboy", description="Inspect a Game Boy cartridge."
     )
     parser.add_argument("rom", type=Path, help="path to a .gb file")
+    parser.add_argument("--dump", type=parse_address, default=None)
+    parser.add_argument("--length", type=int, default=64)
     args = parser.parse_args()
 
     try:
@@ -80,7 +115,17 @@ def main() -> int:
         print(f"gameboy: {args.rom} is not a valid cartridge: {error}")
         return 1
 
-    print(describe(cartridge))
+    if args.dump is not None:
+        print(
+            f"Dump from {args.dump:#06x} to {args.dump + args.length:#06x} ({args.length} bytes)"
+        )
+        # print(f"{"-" * 72}")
+        print("--- BEGIN ---")
+        print(dump(Bus(cartridge), args.dump, args.length))
+        print("--- END ---\n")
+    else:
+        print(describe(cartridge))
+
     return 0
 
 

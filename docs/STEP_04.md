@@ -77,7 +77,8 @@ read fine as properties.
 
 ### 3. The flag register is four bits and four holes
 
-`F` is one byte, but only its top nibble exists:
+A "nibble" is four bits, so a byte is two nibbles: the top one is bits 7 to 4 and
+the low one is bits 3 to 0. `F` is one byte, but only its top nibble exists:
 
 ```
 bit    7     6     5     4     3  2  1  0
@@ -91,10 +92,14 @@ bit    7     6     5     4     3  2  1  0
 | `H` | Half carry | a carry crossed bit 3 into bit 4. Only `DAA` ever reads it |
 | `C` | Carry | a carry left bit 7, or a borrow was needed |
 
-The low nibble is not "usually zero", it is **physically absent**. There are no
-latches there. Write `0xFF` to `F` (which you can only do via `POP AF`) and read
-it back and you get `0xF0`. That is a real behaviour that Blargg's test ROMs
-check, so it belongs in your setter, not in a comment.
+The low nibble is not "usually zero", it is **physically absent**. A latch, or
+flip-flop, is the circuit that stores one bit; the chip has four of them wired up
+for the top nibble and none at all for the low one, so those four bits can never
+hold a value.
+
+The consequence you can observe: write `0xFF` to `F` (which you can only do via
+`POP AF`) and read it back, and you get `0xF0`. That is a real behaviour that
+Blargg's test ROMs check, so it belongs in your setter, not in a comment.
 
 `N` and `H` exist almost entirely for `DAA`, the decimal-adjust instruction used
 by games that store scores as binary-coded decimal. You will implement it in
@@ -166,9 +171,9 @@ constructor with one line explaining when it would matter.
 
 ```python
 def step(self) -> int:
-    opcode = self.fetch_u8()          # read at PC, then PC += 1
-    instruction = OPCODES[opcode]     # decode
-    instruction.execute(self)         # execute, may move PC again
+    opcode = self.fetch_u8()  # read at PC, then PC += 1
+    instruction = OPCODES[opcode]  # decode
+    instruction.execute(self)  # execute, may move PC again
     return instruction.cycles
 ```
 
@@ -194,8 +199,7 @@ def fetch_u8(self) -> int:
     return value
 
 
-def fetch_u16(self) -> int:
-    ...  # two fetch_u8 calls, low byte first
+def fetch_u16(self) -> int: ...  # two fetch_u8 calls, low byte first
 ```
 
 Write `fetch_u16` in terms of `fetch_u8`, for the same reason `read16` was
@@ -324,66 +328,351 @@ collision to worry about.
 
 ## Tasks
 
+These are written out at length on purpose. Every term is defined where it is
+used, and no sentence mixes a hardware fact with a Python mechanism. If a section
+covers something you already know, skip it; the length is there so that nothing
+requires a second reading to parse.
+
 ### 0. Carry-over from Step 03: the hexdump
 
 `--dump ADDR --length N` never landed, and two of Step 03's acceptance criteria
-depend on it. Do it first: it is twenty minutes, it exercises the bus you just
-built, and you are about to want it for debugging the CPU anyway. Step 03 task 9
-has the format.
+depend on it. Do it first. It takes twenty minutes, it exercises the bus you just
+built, and you will want it within the hour to look at whatever byte the CPU
+chokes on. Step 03 task 9 has the output format.
 
-### 1. `src/gameboy/cpu.py`: `Registers`
+### 1. `src/gameboy/cpu.py`: the `Registers` class
 
-A mutable dataclass with `a`, `b`, `c`, `d`, `e`, `h`, `l` (8-bit), `sp` and
-`pc` (16-bit), and the four flags as `bool`s. Defaults of `0` / `False` are fine.
+**What this class is.** A plain container for the CPU's state. It holds numbers
+and booleans and nothing else. It does not know about the bus, it does not
+execute anything, and it has no idea what an instruction is. Keeping it separate
+from `CPU` means your tests can build one, poke at it, and assert on it without
+constructing a bus or a cartridge.
+
+**What it stores.** Nine numbers and four booleans:
+
+| Attribute | Range | Meaning |
+| --- | --- | --- |
+| `a` | 0 to 255 | the accumulator |
+| `b`, `c`, `d`, `e`, `h`, `l` | 0 to 255 | general purpose |
+| `sp` | 0 to 65535 | stack pointer |
+| `pc` | 0 to 65535 | program counter |
+| `z`, `n`, `h_flag`, `c_flag` | `True` / `False` | the four flags |
+
+Note the awkwardness in that last row, and deal with it now rather than
+discovering it halfway through. The register named `H` and the half-carry flag
+named `H` are different things, and so are `C` the register and `C` the carry
+flag. They collide in any naming scheme that uses bare letters for both. Pick one
+of these and apply it everywhere:
+
+- registers keep bare letters, flags get a prefix: `h` and `flag_h`
+- flags keep bare letters, registers get a prefix: `reg_h` and `h`
+
+The first reads better at the call sites you will write most often, which are
+register accesses. Whatever you pick, do not mix them.
+
+**How to declare it in Python.** Use `@dataclass`. Write each attribute as a name,
+a colon, a type, and a default value:
+
+```python
+@dataclass(slots=True)
+class Registers:
+    a: int = 0
+```
+
+Three things about that:
+
+- The decorator reads those annotated lines and generates an `__init__` that
+  assigns each one. Without the decorator, a line like `a: int` is an annotation
+  and nothing more: no attribute is created, and `Registers().a` raises
+  `AttributeError`. You met the mirror of this bug in `Bus`, where an assignment
+  *without* an annotation became a class attribute shared by every instance.
+- Do **not** pass `frozen=True`. `Cartridge` is frozen because a ROM image never
+  changes. Registers change on almost every instruction, so this class must be
+  mutable.
+- `slots=True` makes attribute access slightly faster and instances smaller, and
+  it is the same option you used on `Cartridge`. It has one consequence that
+  matters here, covered in task 2.
+
+**Give every attribute a default of `0` or `False`.** A `Registers()` with no
+arguments is then valid, which is what your unit tests will want. The real
+starting values come from task 4, not from these defaults.
 
 ### 2. The `f` property
 
-Getter packs the four booleans into the top nibble. Setter unpacks, and the low
-nibble is discarded on the way in because the hardware has no latches for it.
+**The hardware fact.** `F` is a single byte, and only its top four bits exist. A
+"nibble" is four bits, so the top nibble is bits 7, 6, 5 and 4. Those four bits
+are the flags:
+
+```
+bit     7     6     5     4     3     2     1     0
+      [ Z ] [ N ] [ H ] [ C ] [ - ] [ - ] [ - ] [ - ]
+       128    64    32    16      always read as 0
+```
+
+Bits 3 to 0 are not "conventionally zero". There is no storage there at all. The
+chip has four flip-flops wired up for the top four bits and nothing wired up for
+the bottom four, so those bits can never hold a value. A flip-flop, or latch, is
+the circuit that physically stores one bit; the low nibble has none.
+
+**What you are storing in Python.** Four separate `bool` attributes, one per flag,
+declared in task 1. There is no byte anywhere in your object. Nothing stores `F`.
+
+**What the getter must do.** A few instructions want all four flags as a single
+byte, laid out as in the diagram. The getter builds that byte on demand. Each
+flag that is `True` contributes the value of its bit position; each flag that is
+`False` contributes nothing:
+
+```
+z = True, n = False, h = True, c = True
+
+    128  (bit 7, because z is True)
+  +   0  (bit 6, because n is False)
+  +  32  (bit 5, because h is True)
+  +  16  (bit 4, because c is True)
+  = 176, which is 0xB0
+```
+
+You can express that as additions, as `<<` and `|`, or with `bits.set_bit`. They
+are the same arithmetic. Pick the one you find clearest and use the same style
+for the pair properties in task 3.
+
+**What the setter must do.** It receives a byte and performs the reverse: for each
+of the four bit positions, decide whether that bit is set, and store the answer
+as a `bool`. `bits.get_bit(value, 7)` already returns a `bool`, which is exactly
+the shape you need.
+
+**Why the low nibble needs no code.** Because the setter only ever inspects bits 7
+to 4, the incoming byte's bottom four bits are ignored automatically. You do not
+need to mask them off. Write a comment saying so, because to a later reader it
+looks like an oversight rather than a decision.
+
+**The observable consequence,** which is what your test asserts: assign `0xFF`,
+read back `0xF0`.
+
+**The `slots` collision.** With `slots=True`, every annotated attribute becomes a
+fixed storage slot on the class. A property is also stored on the class, under
+its own name. If a slot and a property share a name, one silently wins and you
+get an attribute that either never stores or never computes. So there must be no
+attribute named `f` in task 1. `f` exists only as a property.
 
 ### 3. The pair properties
 
-`af`, `bc`, `de`, `hl`, each with a getter and a setter. `af`'s setter must go
-through the `f` setter rather than storing a byte, so the low-nibble rule is
-stated once.
+**The hardware fact.** The eight-bit registers are wired together in pairs, and
+several instructions address a pair as one sixteen-bit number. The four pairs are
+`AF`, `BC`, `DE` and `HL`. In each pair the first letter is the high byte:
 
-Mask in the setters, not at the call sites. Python integers do not wrap, so
-`registers.hl = registers.hl + 1` at `0xFFFF` gives you `0x10000` and a bug that
-surfaces four steps later. `u8` and `u16` from `bits.py` are exactly for this.
+```
+b = 0x12       c = 0x34
+bc = 0x1234
+     ^^ ^^
+     b  c
+```
+
+**What you are writing in Python.** Four properties named `af`, `bc`, `de` and
+`hl`, each with a getter and a setter. They store nothing. Reading `regs.bc`
+runs code that combines `b` and `c`; writing `regs.bc = 0x1234` runs code that
+splits the value back into `b` and `c`.
+
+You already have all three helpers in `bits.py`: `join_bytes(high, low)` builds
+the sixteen-bit value, `high_byte(value)` and `low_byte(value)` take it apart.
+
+The mechanism, for one pair:
+
+```python
+@property
+def bc(self) -> int:
+    return bits.join_bytes(self.b, self.c)
+
+
+@bc.setter
+def bc(self, value: int) -> None:
+    self.b = bits.high_byte(value)
+    self.c = bits.low_byte(value)
+```
+
+`@bc.setter` reads oddly the first time. After the getter is defined, the name
+`bc` refers to a `property` object. `.setter` is a method on that object which
+returns a new property carrying both halves. That is why both functions must
+share the name `bc`.
+
+**Why the pairs are not stored as fields.** It is tempting to also keep a `bc`
+attribute and update it alongside `b` and `c`. Do not. Then `LD B, 5` has to
+remember to update two places, and the day it does not, `b` and `bc` disagree.
+One source of truth per fact.
+
+**`AF` is the special one.** Its low half is the flag byte, which does not exist
+as storage. So `af`'s setter must pass the low byte through the `f` setter from
+task 2 rather than assigning it anywhere directly. That keeps the "low nibble
+does not exist" rule stated in exactly one place. The test for this: assign
+`0x12FF` to `af`, read back `0x12F0`.
+
+**Masking, and why it is the setter's job.** Python integers have no fixed width
+and never overflow. `0xFF + 1` is `0x100`, not `0`. The hardware wraps; Python
+does not. So somebody has to apply the wrap, and that somebody is the setter,
+using `bits.u8` for the eight-bit registers and `bits.u16` for `sp`, `pc` and the
+pairs.
+
+Put it in the setter rather than at the call sites. There will eventually be
+hundreds of call sites and eight setters, and a rule enforced in eight places
+beats the same rule remembered in hundreds.
+
+This means the eight-bit registers need setters too, not just the pairs. Writing
+eight nearly identical property pairs by hand is tedious and you may reasonably
+decide the masking belongs elsewhere. Two escape hatches worth knowing about:
+`__setattr__`, which intercepts every attribute assignment on the object, and
+`dataclasses.field` with a custom descriptor. Both are more machinery than this
+step needs. Write them out by hand today; revisit if it annoys you.
 
 ### 4. `Registers.post_boot()`
 
-A `classmethod` returning the DMG table from the theory section, with a link to
-Pan Docs and a `TODO` about the `F = 0x80` case.
+**The hardware fact.** A real Game Boy runs a 256-byte boot ROM before the
+cartridge gets control. It scrolls the logo, plays the chime, checks the header
+checksum you implemented in Step 02, and jumps to `0x0100`. We do not emulate it
+(that was a Step 03 decision), so we have to fabricate the register values it
+would have left behind. Section 4 of the theory above has the table and explains
+which of those values are meaningful.
+
+**What you are writing in Python.** A `@classmethod` that constructs and returns a
+`Registers` with those values already set.
+
+```python
+@classmethod
+def post_boot(cls) -> Self: ...
+```
+
+`cls` is the class itself, arriving as an explicit first parameter, the same way
+`self` is the instance. You met it in `Cartridge.from_bytes`. Return `cls(...)`
+rather than `Registers(...)` so a subclass would get its own type back, and
+annotate the return as `Self`.
+
+**One wrinkle in the data.** `F` is `0xB0` on a cartridge whose header checksum
+byte is non-zero, and `0x80` when that byte is `0x00`, because the flags are left
+over from the boot ROM's checksum comparison. Do not model that today. Leave a
+`TODO` on the method with one line explaining when it would matter, and a link to
+[Pan Docs' Power Up Sequence](https://gbdev.io/pandocs/Power_Up_Sequence.html).
+
+**The test:** `post_boot().af` is `0x01B0`, and `post_boot().pc` is `0x0100`.
 
 ### 5. `UnknownOpcodeError`
 
-Carrying `opcode` and `address`.
+**The situation it describes.** The CPU fetched a byte, looked it up in the
+opcode table, and found nothing there. Either you have not implemented that
+instruction yet, or `PC` has wandered into data and is executing bytes that were
+never meant to be instructions. Theory section 8 argues why this raises rather
+than being ignored.
 
-### 6. `CPU`
+**What you are writing in Python.** An exception class carrying two pieces of
+data: the opcode byte, and the address it was fetched from.
 
-Holds a bus (typed as the `MemoryDevice` protocol from Step 03, not as `Bus`)
-and a `Registers`. Give it `fetch_u8`, `fetch_u16` and `step`.
+```python
+class UnknownOpcodeError(Exception):
+    def __init__(self, opcode: int, address: int) -> None:
+        super().__init__(f"unknown opcode 0x{opcode:02X} at 0x{address:04X}")
+        self.opcode = opcode
+        self.address = address
+```
+
+`super().__init__(message)` is what makes `str(error)` return that text; it is the
+base class that stores the message. Storing `opcode` and `address` as attributes
+as well means a caller can inspect them without parsing the string.
+
+**Why the address is the important half.** It is what you feed to `--dump` to see
+what `PC` actually walked into. Note that it must be the address the opcode was
+*read from*, not the current value of `pc`, because fetching has already moved
+`pc` past it by the time you raise. Capture it before you fetch.
+
+### 6. The `CPU` class
+
+**What it holds.** Two things: a memory bus, and a `Registers`. That is the entire
+state of the machine as far as this step is concerned.
+
+**How to type the bus parameter.** Use `MemoryDevice`, the `Protocol` you declared
+in Step 03, not `Bus`. A protocol describes a shape rather than a class: anything
+with a `read` and a `write` of the right signatures satisfies it, with no
+inheritance and no registration. The CPU genuinely only needs those two methods.
+
+The practical payoff is in your tests. A test that drives the CPU over a small
+fake object with a `read` method is much easier to write than one that builds a
+32 KiB ROM image and a cartridge. This is the protocol from Step 03 paying for
+itself, one step later.
+
+**The two fetch helpers.** `fetch_u8` does three things in order: read the byte at
+`pc`, advance `pc` by one, return the byte. Advancing must wrap, so it goes
+through `bits.u16`.
+
+`fetch_u16` reads two bytes and combines them into one sixteen-bit value. The
+Game Boy stores sixteen-bit values with the low byte first, so the first byte you
+read is the low half. Write it as two calls to `fetch_u8` rather than reaching
+into the bus directly: in Step 09 every bus access will tick the clock, and a
+composition that is honest today gets the timing right for free then.
+
+There is a real trap in `fetch_u16`. `bits.join_bytes` takes the high byte first,
+but you read the low byte first. If you write both fetches inline as arguments,
+Python evaluates arguments left to right and the two reads happen in the wrong
+order. Bind the first byte to a local variable, then fetch the second. The bug is
+invisible on inspection and your little-endian test will catch it.
+
+**`step`.** Theory section 5 has the four-line sketch. Fetch an opcode, look it up,
+call it, return its cycle count. It should contain no `if` statement about
+opcodes: if you find yourself special-casing one, the table is the wrong shape.
+
+Do **not** add a `run()` method that loops. The loop belongs to whoever owns the
+whole machine, because from Step 09 onward it also has to tick the timer with the
+number `step` returns. Two candidates for that owner later: a `Machine` class, or
+the CLI. Leaving it out today keeps the choice open.
 
 ### 7. The opcode table
 
-A module-level `Final[dict[int, Instruction]]` with two entries:
+**What a table is here.** A mapping from a byte to a description of what that byte
+means. Theory section 7 compares the options and lands on a dict.
 
-- `0x00` `NOP`, 4 cycles, a body that does nothing.
-- `0xC3` `JP a16`, 16 cycles, a body that sets `pc` to `fetch_u16()`.
+**The `Instruction` record.** A frozen dataclass with three fields: a name for
+tracing, a cycle count, and the function that performs the instruction.
 
-`NOP`'s body being empty is worth a moment: it does nothing *and that is the
-instruction*, so `pass` here is meaningful rather than a stub. Say so in a
-comment, because in a week you will not remember which empty bodies were
-deliberate.
+```python
+@dataclass(frozen=True, slots=True)
+class Instruction:
+    name: str
+    cycles: int
+    execute: Callable[["CPU"], None]
+```
 
-Define the table after the `CPU` class, or use string annotations, so the
-`Callable[["CPU"], None]` reference resolves.
+`Callable[["CPU"], None]` is the type of "a function taking a CPU and returning
+nothing". `Callable` is imported from `collections.abc`, not from `typing`. The
+quotes around `"CPU"` make it a forward reference, which you need if `Instruction`
+is defined above `CPU` in the file.
+
+**The two entries.**
+
+`0x00` is `NOP`, 4 cycles. Its body does nothing. This is worth a comment,
+because an empty function usually means an unfinished one. Here the emptiness is
+the instruction: `NOP` exists precisely to consume four cycles and advance `PC`
+by one, and `PC` was already advanced by the fetch.
+
+`0xC3` is `JP a16`, 16 cycles. `a16` means the instruction is followed by a
+sixteen-bit address, stored low byte first. Its body reads that address with
+`fetch_u16` and assigns it to `pc`. Nothing else. Note that `fetch_u16` has
+already moved `pc` past the two operand bytes by the time you assign, which is
+harmless because you are overwriting `pc` anyway. That is the same fact that
+makes jumps simple in general: nothing needs to be undone.
+
+**Where to put the dict.** Module level, annotated `Final`, defined after the
+`CPU` class so the references resolve. `Final` tells mypy that the name is never
+rebound; it does not make the dict itself immutable.
+
+**Look up with `.get`, not `[...]`.** A missing key with `[...]` raises
+`KeyError`, which says nothing useful. `.get` returns `None`, and you turn that
+`None` into your own `UnknownOpcodeError` with the opcode and address in it.
 
 ### 8. CLI: `--trace N`
 
-Build the cartridge, wrap it in a `Bus`, construct a `CPU` with `post_boot()`
-registers, and step `N` times, printing one line each:
+**What it does.** Builds the machine and runs it for N instructions, printing one
+line per instruction so you can watch `PC` move.
+
+**The order of construction:** read the cartridge from disk, wrap it in a `Bus`,
+build a `CPU` over that bus with `Registers.post_boot()`.
+
+**The output format.** One line per step:
 
 ```
 0100  00  NOP        A:01 F:B0 BC:0013 DE:00D8 HL:014D SP:FFFE  4
@@ -391,66 +680,96 @@ registers, and step `N` times, printing one line each:
 0150  ...
 ```
 
-Address and opcode come from *before* the step, registers from after. Catch
-`UnknownOpcodeError`, print it, and exit non-zero: reaching an unimplemented
-opcode is the expected outcome today, and it should look like a stopping point
-rather than a traceback.
+Left to right: the address the instruction was fetched from, the opcode byte, the
+instruction's name, the register values, and the cycle count.
+
+**The ordering problem this creates.** The address and the opcode have to be read
+*before* stepping, because stepping moves `pc`. The register values and the cycle
+count only exist *after*. So the loop body reads `pc`, peeks at the opcode with
+`bus.read` (peeking, not fetching, so `pc` does not move), calls `step`, and then
+formats the line from a mixture of both.
+
+Peeking means you look up the same opcode twice per instruction, once for the
+trace and once inside `step`. That is fine here. If it ever bothers you, the
+alternative is for `step` to return a small record instead of a bare `int`, which
+is a change to make when a second caller wants the same information, not before.
+
+**Handle the error.** Wrap the loop in `try` / `except UnknownOpcodeError`. Print
+the exception, return a non-zero exit code, and do not let a traceback reach the
+terminal. Hitting an unimplemented opcode is the *expected* outcome today, since
+you have implemented two instructions. It should read as a stopping point, not as
+a crash.
+
+**Wiring the argument.** `--trace` takes a count, so `type=int` and
+`default=None`. Guard with `is not None` rather than truthiness, since `--trace 0`
+is a legitimate if useless request and `0` is falsy. Same trap as `--dump 0x0000`.
 
 ### 9. Tests in `tests/test_cpu.py`
 
-At least these:
+Group them by what they pin down. Twelve or so, in four clusters.
 
-- pairs compose and decompose: set `b`/`c`, read `bc`; set `bc`, read `b`/`c`
-- `f` packs each flag into the right bit, one test per flag or one parametrized
-- `f` drops the low nibble: `registers.f = 0xFF`, expect `0xF0`
-- `af` round-trips through the same rule: `registers.af = 0x12FF` gives `0x12F0`
-- setters mask: `registers.a = 0x1FF` gives `0xFF`, `registers.hl = 0x10000`
-  gives `0x0000`
-- `post_boot` matches the table, and `af` reads back as `0x01B0`
-- `fetch_u8` returns the byte at `pc` and advances `pc` by one
-- `fetch_u16` is little-endian and advances `pc` by two
-- `pc` wraps: fetch at `0xFFFF` leaves `pc` at `0x0000`
-- `NOP` advances `pc` by one and returns 4
-- `JP a16` sets `pc` to the operand and returns 16
-- an unknown opcode raises, and the exception's `address` is the opcode's own
-  address, not the incremented `pc`
+**The pair properties compose and decompose.** Set `b` and `c` as bytes, assert
+`bc` reads back as the combined value. Then the reverse: assign to `bc`, assert
+`b` and `c` hold the right halves. One test per direction is enough; you do not
+need all four pairs twice.
 
-For the ones that need a program, add a conftest helper that builds a ROM image
-with your bytes at the entry point and returns a bus over it, so tests read as
-`cpu = cpu_running(0x00, 0xC3, 0x50, 0x01)` rather than as five lines of
-`bytearray` surgery. The synthetic ROM fixture is already there; this is one
-more function next to it.
+**The flag byte packs and unpacks correctly.** That each flag lands in the right
+bit is four assertions, which parametrizing handles well: a list of
+`(flag_name, expected_byte)` pairs, one case per flag. Then two tests for the
+missing low nibble: assigning `0xFF` to `f` reads back `0xF0`, and assigning
+`0x12FF` to `af` reads back `0x12F0`.
+
+**Values wrap at the right width.** Assigning `0x1FF` to an eight-bit register
+leaves `0xFF`. Assigning `0x10000` to `hl` leaves `0x0000`. Fetching at `0xFFFF`
+leaves `pc` at `0x0000` rather than `0x10000`. That last one is the important
+one: it is the only test that proves the fetch path wraps, and wrapping is what
+stops a runaway `PC` from raising `IndexError` somewhere unrelated.
+
+**The instruction cycle works.** `post_boot` matches the Pan Docs table.
+`fetch_u8` returns the byte at `pc` and advances `pc` by one. `fetch_u16` is
+little-endian and advances by two. `NOP` advances `pc` by one and returns 4.
+`JP a16` sets `pc` to its operand and returns 16. An unknown opcode raises, and
+the exception's `address` attribute is the opcode's own address rather than the
+incremented `pc`.
+
+**A fixture for programs.** Several of those tests need a CPU whose memory
+contains a specific sequence of bytes. Writing that inline is five lines of
+`bytearray` surgery per test, repeated. Add a helper to `conftest.py` that takes
+the bytes and returns a ready CPU, so a test opens with something like:
+
+```python
+cpu = cpu_running(0x00, 0xC3, 0x50, 0x01)
+```
+
+Two ways to build it, and the choice is yours. Put the bytes into a ROM image at
+the entry point and wrap it in a real `Cartridge` and `Bus`, which reuses the
+fixtures you already have. Or write a fake device holding a `bytearray`, which is
+shorter and leans on the `MemoryDevice` protocol. The second is closer to what
+the tests are actually about, since none of these tests care about cartridge
+headers.
 
 ---
 
 ## Hints
 
-- The `slots` and property collision from the theory section is the trap. If an
-  attribute mysteriously stops updating, that is what happened.
+The tasks cover the traps in place. These are the ones with nowhere else to live.
+
 - `Callable` lives in `collections.abc`, not `typing`, since 3.9. Ruff's `UP`
   rules will tell you if you get it wrong, which is one of the reasons they are
   enabled.
-- `bits.join_bytes(high, low)` still takes high first. `fetch_u16` reads low
-  first and passes second: `join_bytes(self.fetch_u8(), low)` is wrong because
-  Python evaluates arguments left to right, so the two fetches would happen in
-  the wrong order. Bind the low byte to a local first. This is a real bug that
-  is invisible on inspection.
-- `step()` should have no `if` in it. If you find yourself special-casing an
-  opcode inside `step`, the table is the wrong shape.
-- Do not give `CPU` a `run()` method that loops. The loop belongs to whoever
-  owns the machine, because in Step 09 it also has to tick the timer. Two
-  candidates for that owner later: a `Machine`/`GameBoy` class, or the CLI.
-  Leaving it out today keeps the choice open.
-- Type the bus parameter as `MemoryDevice`, not `Bus`. The CPU genuinely only
-  needs `read` and `write`, and a test that drives the CPU over a fake device is
-  much easier to write than one that builds a cartridge. This is the `Protocol`
-  from Step 03 paying for itself.
+- If an attribute mysteriously stops updating, it is the `slots` and property
+  name collision from task 2. It fails silently, so it does not look like the
+  cause of anything.
 - `0xC3` is the only jump you are implementing. Resist adding `JR`, `CALL` or
   the conditional forms: they are Step 06, and conditional jumps have two
   different cycle counts, which changes the shape of `Instruction`. Meet that
   problem when you have to.
 - For the trace output, `f"{value:02X}"` and `f"{value:04X}"` are the whole
   formatting vocabulary you need. Ruby's `%02X` with different punctuation.
+- When something does not behave, print the registers rather than reasoning
+  about them. `Registers` is a dataclass, so it has a generated `__repr__` that
+  shows every field, and `print(cpu.registers)` in a test tells you more in one
+  line than reading the setter again does.
 
 ---
 
