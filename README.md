@@ -12,8 +12,9 @@ with the theory, the tasks and the acceptance criteria.
 | --- | --- | --- |
 | 01 | [Project scaffolding & bit primitives](docs/STEP_01.md) | done |
 | 02 | [Cartridge & ROM header](docs/STEP_02.md) | done |
-| 03 | [The memory bus](docs/STEP_03.md) | in progress |
-| 04 | [CPU state & the fetch-decode-execute skeleton](docs/STEP_04.md) | next |
+| 03 | [The memory bus](docs/STEP_03.md) | done |
+| 04 | [CPU state & the fetch-decode-execute skeleton](docs/STEP_04.md) | done |
+| 05 | [Loads, the ALU and the flags](docs/STEP_05.md) | next |
 
 ## Requirements
 
@@ -39,6 +40,43 @@ Version:          1
 Header checksum:  0x0A  valid
 Global checksum:  0x16BF  (computed 0x16BF)
 ```
+
+Hex dump any address in the 16-bit address space, through the memory bus:
+
+```
+uv run python -m gameboy path/to/rom.gb --dump 0x0150 --length 32
+```
+
+```
+Dump from 0x0150 to 0x0170 (32 bytes)
+--- BEGIN ---
+0150: C3 0C 02 CD E3 29 F0 41  E6 03 20 FA 46 F0 41 E6  .....).A.. .F.A.
+0160: 03 20 FA 7E A0 C9 7B 86  27 22 7A 8E 27 22 3E 00  . .~..{.'"z.'">.
+--- END ---
+```
+
+Trace execution from the cartridge entry point, one line per instruction:
+
+```
+uv run python -m gameboy path/to/rom.gb --trace 3
+```
+
+```
+0100  00  NOP        A:01 F:B0 BC:0013 DE:00D8 HL:014D SP:FFFE  4
+0101  C3  JP a16     A:01 F:B0 BC:0013 DE:00D8 HL:014D SP:FFFE  16
+0150  C3  JP a16     A:01 F:B0 BC:0013 DE:00D8 HL:014D SP:FFFE  16
+```
+
+Left to right: the address the opcode was fetched from, the opcode byte, the
+mnemonic, the register state after the instruction, and its cost in T-cycles.
+Two instructions are implemented so far, so the trace stops early with a non-zero
+exit code and a message naming the opcode and the address it was read from:
+
+```
+gameboy: unknown opcode 0xAF at 0x020C
+```
+
+That address is what you feed back to `--dump`.
 
 ## Development
 
