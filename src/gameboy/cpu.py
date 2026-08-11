@@ -10,10 +10,12 @@
 | `PC`     | 16    | Program counter.                                              |
 """
 
+from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Self
+from typing import Final, Self
 
-from gameboy.bits import get_bit, high_byte, join_bytes, low_byte
+from gameboy.bits import get_bit, high_byte, join_bytes, low_byte, u16
+from gameboy.memory import MemoryDevice
 
 # Since masking is _expected_ to be executed from the top layer, we want to ensure
 # no invalid values slip into the Registers class.
@@ -133,3 +135,71 @@ class Registers:
     def hl(self, value: int) -> None:
         self.h = high_byte(value)
         self.l = low_byte(value)
+
+
+class UnknownOpcodeError(Exception):
+    def __init__(self, opcode: int, address: int) -> None:
+        super().__init__(f"unknown opcode 0x{opcode:02X} at 0x{address:04X}")
+        self.opcode = opcode
+        self.address = address
+
+
+@dataclass(frozen=True, slots=True)
+class Instruction:
+    name: str
+    cycles: int
+    execute: Callable[["CPU"], None]
+
+
+@dataclass
+class CPU:
+    bus: MemoryDevice
+    registers: Registers
+
+    def fetch_u8(self) -> int:
+        # where are you, dear Program Counter?
+        # please, tell me what 8 bits are on your sight!
+        value = self.bus.read(self.registers.pc)
+        # ok, now advance one step, see you on the next address!
+        self.registers.pc = u16(self.registers.pc + 1)  # out(t) = out(t-1) + 1
+
+        return value
+
+    def fetch_u16(self) -> int:
+        # tell me what 8 bits can you see now and advance 1 step
+        low_byte = self.fetch_u8()
+        # do it again
+        high_byte = self.fetch_u8()
+
+        return join_bytes(high_byte, low_byte)
+
+    def step(self) -> int:
+        # PC advances before execution, not after. By the time an instruction
+        # runs, PC already points at its first operand byte.
+        opcode = self.fetch_u8()
+        instruction = OPCODES.get(opcode)
+
+        if instruction is None:
+            raise UnknownOpcodeError(opcode, u16(self.registers.pc - 1))
+
+        instruction.execute(self)
+
+        return instruction.cycles
+
+
+def _nop(cpu: CPU) -> None:
+    # NOP's job is to pass four cycles and advance PC by one, and fetch_u8
+    # already advanced PC.
+    pass
+
+
+def _jp_a16(cpu: CPU) -> None:
+    # move the PC to the address yielded by reading two consecutive bytes
+    cpu.registers.pc = cpu.fetch_u16()
+
+
+OPCODES: Final[dict[int, Instruction]] = {
+    # Address         OPCODE     CYCLES
+    0x00: Instruction("NOP", 4, _nop),
+    0xC3: Instruction("JP a16", 16, _jp_a16),
+}

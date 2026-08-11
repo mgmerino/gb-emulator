@@ -6,10 +6,12 @@ their name in a test's parameter list, which is pytest's answer to RSpec's
 `let` and `subject`.
 """
 
+from typing import Protocol
+
 import pytest
 
 from gameboy.cartridge import Cartridge
-from gameboy.cpu import Registers
+from gameboy.cpu import CPU, Registers
 from gameboy.memory import Bus
 
 
@@ -35,6 +37,19 @@ class FakeCartridge:
 
     def write(self, address: int, value: int) -> None:
         self.writes.append((address, value))
+
+
+class FlatMemory:
+    """64 KiB of RAM with no regions and no rules."""
+
+    def __init__(self) -> None:
+        self.data = bytearray(0x10000)
+
+    def read(self, address: int) -> int:
+        return self.data[address]
+
+    def write(self, address: int, value: int) -> None:
+        self.data[address] = value
 
 
 @pytest.fixture
@@ -84,3 +99,35 @@ def fake_bus() -> tuple[Bus, FakeCartridge]:
 @pytest.fixture
 def registers() -> Registers:
     return Registers()
+
+
+class CpuRunning(Protocol):
+    """The call signature of the `cpu_running` fixture.
+
+    `Callable[..., CPU]` cannot express a keyword argument, so `at=` would go
+    unchecked. A Protocol with `__call__` can.
+    """
+
+    def __call__(self, *program: int, at: int = ...) -> CPU: ...
+
+
+@pytest.fixture
+def cpu_running() -> CpuRunning:
+    """A CPU whose PC points at `program`, loaded in flat memory.
+    Takes opcode bytes so a test reads like an assembler listing:
+
+        cpu = cpu_running(0xC3, 0x50, 0x01)   # JP 0x0150
+
+    Writes wrap with `& 0xFFFF`, so a program can start at the top of memory and
+    run off the end.
+    """
+
+    def _cpu_running(*program: int, at: int = 0x0100) -> CPU:
+        memory = FlatMemory()
+        for offset, byte in enumerate(program):
+            memory.data[(at + offset) & 0xFFFF] = byte
+        registers = Registers()
+        registers.pc = at
+        return CPU(memory, registers)
+
+    return _cpu_running

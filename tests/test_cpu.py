@@ -1,6 +1,7 @@
 import pytest
+from conftest import CpuRunning
 
-from gameboy.cpu import Registers
+from gameboy.cpu import Registers, UnknownOpcodeError
 
 
 def test_pair_composes_from_its_halves(registers: Registers) -> None:
@@ -192,3 +193,53 @@ def test_post_boot_af_is_01b0() -> None:
     assert registers.af == 0x01B0
 
 
+def test_fetch_u8_returns_the_byte_and_advances_pc(cpu_running: CpuRunning) -> None:
+    cpu = cpu_running(0x3C)
+
+    assert cpu.fetch_u8() == 0x3C
+    assert cpu.registers.pc == 0x0101
+
+
+def test_fetch_u16_is_little_endian_and_advances_pc_by_two(
+    cpu_running: CpuRunning,
+) -> None:
+    # Low byte first in memory: 0x34, then 0x12  ->  0x1234
+    cpu = cpu_running(0x34, 0x12)
+
+    assert cpu.fetch_u16() == 0x1234
+    assert cpu.registers.pc == 0x0102
+
+
+def test_fetch_wraps_at_the_top_of_memory(cpu_running: CpuRunning) -> None:
+    cpu = cpu_running(0x99, at=0xFFFF)
+
+    assert cpu.fetch_u8() == 0x99
+    assert cpu.registers.pc == 0x0000
+
+
+def test_nop_advances_pc_by_one_and_costs_four_cycles(cpu_running: CpuRunning) -> None:
+    cpu = cpu_running(0x00)
+
+    assert cpu.step() == 4
+    assert cpu.registers.pc == 0x0101
+
+
+def test_jp_sets_pc_to_its_operand_and_costs_sixteen_cycles(
+    cpu_running: CpuRunning,
+) -> None:
+    cpu = cpu_running(0xC3, 0x50, 0x01)
+
+    assert cpu.step() == 16
+    assert cpu.registers.pc == 0x0150
+
+
+def test_unknown_opcode_raises_with_the_opcode_and_its_address(
+    cpu_running: CpuRunning,
+) -> None:
+    cpu = cpu_running(0xD3)
+
+    with pytest.raises(UnknownOpcodeError, match="0xD3") as excinfo:
+        cpu.step()
+
+    assert excinfo.value.opcode == 0xD3
+    assert excinfo.value.address == 0x0100
