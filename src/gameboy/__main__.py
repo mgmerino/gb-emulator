@@ -154,9 +154,9 @@ def main() -> int:
 
     if args.dump is not None:
         print(
-            f"Dump from {args.dump:#06x} to {args.dump + args.length:#06x} ({args.length} bytes)"
+            f"Dump from {args.dump:#06x} to "
+            f"{args.dump + args.length:#06x} ({args.length} bytes)"
         )
-        # print(f"{"-" * 72}")
         print("--- BEGIN ---")
         print(dump(Bus(cartridge), args.dump, args.length))
         print("--- END ---\n")
