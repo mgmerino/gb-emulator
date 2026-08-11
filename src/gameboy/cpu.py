@@ -167,11 +167,11 @@ class CPU:
 
     def fetch_u16(self) -> int:
         # tell me what 8 bits can you see now and advance 1 step
-        low_byte = self.fetch_u8()
+        low = self.fetch_u8()
         # do it again
-        high_byte = self.fetch_u8()
+        high = self.fetch_u8()
 
-        return join_bytes(high_byte, low_byte)
+        return join_bytes(high, low)
 
     def step(self) -> int:
         # PC advances before execution, not after. By the time an instruction
