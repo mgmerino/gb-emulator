@@ -1,6 +1,7 @@
 """CLI entry point: `python -m gameboy <rom>` prints a cartridge summary."""
 
 import argparse
+from collections.abc import Iterator
 from itertools import batched
 from pathlib import Path
 
@@ -10,12 +11,16 @@ from gameboy.cartridge import (
     compute_global_checksum,
     compute_header_checksum,
 )
+from gameboy.cpu import CPU, OPCODES, Registers, UnknownOpcodeError
 from gameboy.memory import Bus, MemoryDevice
 
 type Row = tuple[int, int, str]
 BYTES_PER_ROW = 16
 # 16 groups of two hex digits, 15 separators, plus the extra space at the gutter.
 HEX_WIDTH = BYTES_PER_ROW * 3 - 1 + 1
+# Widest mnemonic in the table today is "JP a16". Bump it when a longer one
+# lands, or every row after it loses its columns.
+NAME_WIDTH = 9
 
 
 def format_size(size: int) -> str:
@@ -97,6 +102,37 @@ def dump(bus: MemoryDevice, start: int, length: int) -> str:
     return "\n".join(lines)
 
 
+def trace_line(
+    address: int, opcode: int, name: str, registers: Registers, cycles: int
+) -> str:
+    state = (
+        f"A:{registers.a:02X} F:{registers.f:02X} "
+        f"BC:{registers.bc:04X} DE:{registers.de:04X} "
+        f"HL:{registers.hl:04X} SP:{registers.sp:04X}"
+    )
+
+    return f"{address:04X}  {opcode:02X}  {name:<{NAME_WIDTH}}  {state}  {cycles}"
+
+
+def trace(bus: MemoryDevice, instructions: int) -> Iterator[str]:
+    """Run the machine for `instructions` steps, yielding one line each."""
+    cpu = CPU(bus, Registers.post_boot())
+
+    for _ in range(instructions):
+        # The address and the opcode have to be captured before stepping,
+        # because it moves the pc. The register state and the cycle count only
+        # exist after.
+        address = cpu.registers.pc
+        opcode = bus.read(address)
+
+        cycles = cpu.step()
+
+        # step() returned instead of raising, so the opcode is in the table by
+        # definition. That is what makes `[...]` safe here where `step` needs
+        # `.get`.
+        yield trace_line(address, opcode, OPCODES[opcode].name, cpu.registers, cycles)
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(
         prog="gameboy", description="Inspect a Game Boy cartridge."
@@ -104,6 +140,7 @@ def main() -> int:
     parser.add_argument("rom", type=Path, help="path to a .gb file")
     parser.add_argument("--dump", type=parse_address, default=None)
     parser.add_argument("--length", type=int, default=64)
+    parser.add_argument("--trace", type=int, default=None)
     args = parser.parse_args()
 
     try:
@@ -117,12 +154,21 @@ def main() -> int:
 
     if args.dump is not None:
         print(
-            f"Dump from {args.dump:#06x} to {args.dump + args.length:#06x} ({args.length} bytes)"
+            f"Dump from {args.dump:#06x} to "
+            f"{args.dump + args.length:#06x} ({args.length} bytes)"
         )
-        # print(f"{"-" * 72}")
         print("--- BEGIN ---")
         print(dump(Bus(cartridge), args.dump, args.length))
         print("--- END ---\n")
+    elif args.trace is not None:
+        try:
+            for line in trace(Bus(cartridge), args.trace):
+                print(line)
+        except UnknownOpcodeError as error:
+            # The expected stopping point, not a crash: report it the way the
+            # other CLI errors are reported and leave the traceback out.
+            print(f"gameboy: {error}")
+            return 1
     else:
         print(describe(cartridge))
 
