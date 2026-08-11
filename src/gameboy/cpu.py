@@ -11,6 +11,7 @@
 """
 
 from dataclasses import dataclass
+from typing import Self
 
 from gameboy.bits import get_bit, high_byte, join_bytes, low_byte
 
@@ -65,6 +66,21 @@ class Registers:
             ):
                 raise ValueError(f"{value!r} does not fit in register {name}")
             object.__setattr__(self, name, value)
+
+    @classmethod
+    def post_boot(cls) -> Self:
+        registers = cls()
+        # See https://gbdev.io/pandocs/Power_Up_Sequence.html#cpu-registers
+        # If the header checksum is 0x00, then the carry and half-carry flags
+        # are clear; otherwise, they are both set.
+        registers.af = 0x01B0  # Z=1 N=0 H=? C=?
+        registers.bc = 0x0013
+        registers.de = 0x00D8
+        registers.hl = 0x014D
+        registers.pc = 0x0100
+        registers.sp = 0xFFFE
+
+        return registers
 
     @property
     def f(self) -> int:

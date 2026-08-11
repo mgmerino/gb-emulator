@@ -15,7 +15,7 @@ build-backend = "uv_build"
 
 [tool.ruff.lint]
 # Defaults (E, F) plus I: isort-style import ordering and grouping.
-extend-select = ["I", "UP", "B"]
+extend-select = ["I", "UP", "B", "E711", "E712"]
 
 [tool.mypy]
 strict = true

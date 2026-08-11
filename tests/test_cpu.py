@@ -165,7 +165,30 @@ def test_registers_default_to_zero(registers: Registers) -> None:
     assert registers.l == 0
     assert registers.sp == 0
     assert registers.pc == 0
-    assert registers.z_flag == False
-    assert registers.n_flag == False
-    assert registers.h_flag == False
-    assert registers.c_flag == False
+    assert not registers.z_flag
+    assert not registers.n_flag
+    assert not registers.h_flag
+    assert not registers.c_flag
+
+
+def test_post_boot_matches_the_hardware_table() -> None:
+    # a == 0x01, sp == 0xFFFE, pc == 0x0100, and the rest of the table.
+    registers = Registers.post_boot()
+
+    assert registers.a == 0x01
+    assert registers.b == 0x00
+    assert registers.c == 0x13
+    assert registers.d == 0x00
+    assert registers.e == 0xD8
+    assert registers.h == 0x01
+    assert registers.l == 0x4D
+    assert registers.pc == 0x0100
+    assert registers.sp == 0xFFFE
+
+
+def test_post_boot_af_is_01b0() -> None:
+    registers = Registers.post_boot()
+
+    assert registers.af == 0x01B0
+
+
