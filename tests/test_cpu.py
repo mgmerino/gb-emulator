@@ -6,6 +6,7 @@ from gameboy.cpu import (
     Operand,
     Registers,
     UnknownOpcodeError,
+    count_cycles,
     read_operand,
     write_operand,
 )
@@ -342,3 +343,40 @@ def test_writing_an_unmasked_value_to_a_register_operand_is_rejected(
 
     with pytest.raises(ValueError, match="register b"):
         write_operand(cpu, Operand.B, 0x1FF)
+
+
+@pytest.mark.parametrize(
+    "expected, accesses, immediates",
+    [
+        # No operands at all: the opcode fetch is still one access.
+        (4, (), 0),
+        # Register operands are wires inside the chip and cost nothing.
+        (4, (Operand.B, Operand.C), 0),
+        # Index 6 is a bus access wherever it appears.
+        (8, (Operand.B, Operand.HL_POINTER), 0),
+        (8, (Operand.HL_POINTER, Operand.B), 0),
+        (8, (Operand.HL_POINTER,), 0),
+        # An immediate byte lives in the instruction stream, which is memory.
+        (8, (), 1),
+        (8, (Operand.B,), 1),
+        (12, (Operand.HL_POINTER,), 1),
+        (12, (), 2),
+        # Read-modify-write passes the same operand twice, because the
+        # instruction touches it twice. Free for a register, charged for memory.
+        (4, (Operand.B, Operand.B), 0),
+        (12, (Operand.HL_POINTER, Operand.HL_POINTER), 0),
+        # The widest operation the rule covers: three instruction bytes and a
+        # write.
+        (16, (Operand.HL_POINTER,), 2),
+    ],
+)
+def test_count_cycles_counts_memory_accesses(
+    expected: int, accesses: tuple[Operand, ...], immediates: int
+) -> None:
+    assert count_cycles(*accesses, immediates=immediates) == expected
+
+
+def test_count_cycles_charges_four_per_access() -> None:
+    assert count_cycles() == 4
+    assert count_cycles(Operand.HL_POINTER) - count_cycles(Operand.B) == 4
+    assert count_cycles(immediates=1) - count_cycles() == 4

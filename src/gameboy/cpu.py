@@ -253,6 +253,22 @@ def write_operand(cpu: CPU, operand: Operand, value: int) -> None:
             cpu.registers.l = value
 
 
+T_CYCLES_PER_ACCESS = 4
+
+
+def count_cycles(*accesses: Operand, immediates: int = 0) -> int:
+    """Cost of one generated instruction:
+    One access for the opcode fetch, one per immediate byte, and one for
+    every operand access that reads memory.
+    """
+    total = 1  # the fetch cost one
+    for op in accesses:
+        if op is Operand.HL_POINTER:
+            total += 1  # memory access
+
+    return (total + immediates) * T_CYCLES_PER_ACCESS
+
+
 def _nop(cpu: CPU) -> None:
     # NOP's job is to pass four cycles and advance PC by one, and fetch_u8
     # already advanced PC.
