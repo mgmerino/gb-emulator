@@ -12,6 +12,7 @@
 
 from collections.abc import Callable
 from dataclasses import dataclass
+from enum import IntEnum
 from typing import Final, Self
 
 from gameboy.alu import Flags
@@ -199,6 +200,57 @@ class CPU:
         instruction.execute(self)
 
         return instruction.cycles
+
+
+class Operand(IntEnum):
+    B = 0b000
+    C = 0b001
+    D = 0b010
+    E = 0b011
+    H = 0b100
+    L = 0b101
+    HL_POINTER = 0b110
+    A = 0b111
+
+
+def read_operand(cpu: CPU, operand: Operand) -> int:
+    match operand:
+        case Operand.HL_POINTER:
+            return cpu.bus.read(cpu.registers.hl)
+        case Operand.A:
+            return cpu.registers.a
+        case Operand.B:
+            return cpu.registers.b
+        case Operand.C:
+            return cpu.registers.c
+        case Operand.D:
+            return cpu.registers.d
+        case Operand.E:
+            return cpu.registers.e
+        case Operand.H:
+            return cpu.registers.h
+        case Operand.L:
+            return cpu.registers.l
+
+
+def write_operand(cpu: CPU, operand: Operand, value: int) -> None:
+    match operand:
+        case Operand.HL_POINTER:
+            cpu.bus.write(cpu.registers.hl, value)
+        case Operand.A:
+            cpu.registers.a = value
+        case Operand.B:
+            cpu.registers.b = value
+        case Operand.C:
+            cpu.registers.c = value
+        case Operand.D:
+            cpu.registers.d = value
+        case Operand.E:
+            cpu.registers.e = value
+        case Operand.H:
+            cpu.registers.h = value
+        case Operand.L:
+            cpu.registers.l = value
 
 
 def _nop(cpu: CPU) -> None:
