@@ -124,8 +124,10 @@ reason to have the operand index be a first-class concept in your code rather
 than something you decode inline in each instruction body.
 
 Cycle counts need the same treatment: a generated instruction's cost depends on
-whether any of its operands is index 6. Compute it while you are generating the
-entry, from the indexes you already have in hand.
+how many bus accesses it makes, which the operand indexes tell you. Compute it
+while you are generating the entry, from the indexes you already have in hand.
+Note that "how many accesses" is not "how many operands are index 6" — `INC (HL)`
+has one such operand and makes two accesses. Task 3 has the rule.
 
 ### 4. Half-carry, stated precisely
 
@@ -384,6 +386,106 @@ so it will look familiar to anyone reading it.
 **Acceptance for this task:** every row of the table in theory section 5 that
 concerns an 8-bit operation has a test, and none of those tests import `CPU`.
 
+---
+
+### Start here: the decisions tasks 2 to 6 assume
+
+#### Decision 1: how a `Flags` record reaches the registers
+
+Nothing in `cpu.py` can consume what the ALU returns yet. Every instruction in
+the ALU block would otherwise end with the same four `if ... is not None` lines,
+so that belongs in one place:
+
+```python
+def apply(self, flags: Flags) -> None: ...   # a method on Registers
+```
+
+It writes only the fields that are not `None`, which is the whole point of the
+`None` from theory section 6: `INC B` leaves `C` alone without any instruction
+having to remember to preserve it.
+
+This is the import that makes `cpu.py` depend on `alu.py`. **One direction, for
+the rest of the project.** `alu.py` importing from `cpu.py` is a cycle, and it is
+also the thing that would stop the ALU tests from running without a machine.
+
+Do this first. It is about six lines, everything downstream needs it, and it has a
+clean test: apply `Flags(z=True)` to registers whose `c_flag` is already set, and
+assert `c_flag` is still set.
+
+#### Decision 2: where the operand accessors live
+
+The accessors in task 2 need the register file *and* the bus. Only `CPU` has
+both, so `CPU` is the home — either as methods or as free functions in `cpu.py`.
+There is no import cycle either way; methods read better at the call site, since
+`cpu.read_operand(src)` is what a free function's first argument makes it anyway.
+
+Note what this rules out. Writing them in `alu.py` needs `from gameboy.cpu import
+CPU` there, and decision 1 just pointed the arrow the other way.
+
+> A Python 3.14 detail that will hide this from you: annotations are now
+> evaluated lazily (PEP 649), so a function annotated with an undefined `CPU`
+> defines fine and only fails when something asks for its type hints. Under 3.13
+> the same file raised `NameError` on import. `mypy` still catches it; the
+> interpreter no longer does.
+
+#### Decision 3: how eight ALU operations get one call signature
+
+This is the snag that makes task 5 look worse than it is. `add(a, b)`,
+`adc(a, b, carry)` and `and_(a, b)` have three different shapes, and a generating
+loop needs one.
+
+Three honest ways out:
+
+- Give all eight the signature `(a, b, carry)` and let six ignore the third
+  argument. Uniform, but the signatures now lie, and `add(a, b, carry)` invites a
+  caller to believe the carry matters.
+- Keep `alu.py` honest and adapt at the table, wrapping the six as
+  `lambda a, b, _c: alu.add(a, b)`.
+- Do not unify at all: one `match` on the operation index inside a single
+  dispatch function.
+
+Prefer the second. `alu.py` keeps signatures that describe what each operation
+actually needs, and the adaptation happens at the boundary that requires the
+uniformity.
+
+`CP` then needs one more piece of information — it computes with `sub` but must
+not write `A`. Rather than special-casing index 7 by name, let the table entry
+carry it:
+
+```python
+@dataclass(frozen=True, slots=True)
+class AluOperation:
+    name: str
+    apply: Callable[[int, int, bool], tuple[int, Flags]]
+    writes_result: bool
+```
+
+Eight of those, indexed by `ooo` from theory section 2. Watch the order while you
+type it: `4 AND, 5 XOR, 6 OR`. XOR comes before OR, which is not the order anyone
+recites them in.
+
+#### Then: one instruction by hand, before any loop
+
+Once the three decisions are made, hand-write `LD B, C` (`0x41`) as a single
+table entry. Not generated — typed out. Run it through `cpu.step()` and assert
+`B` took `C`'s value.
+
+Do not skip this. It separates *is my operand plumbing sound* from *is my bit
+pattern arithmetic right*. Generate sixty-four opcodes first and you will be
+debugging both at once, with nothing to tell you which one is lying. Delete the
+hand-written entry when the loop in task 4 replaces it.
+
+#### The order
+
+1. `Registers.apply(flags)` — decision 1.
+2. `Operand` and the accessors — decision 2, which is task 2 below.
+3. The cycle helper — task 3.
+4. `LD B, C` by hand.
+5. Generate `0x40`–`0x7F` — task 4.
+6. The ALU block — task 5, which reuses every piece above.
+7. Irregular loads, 16-bit, and `DAA`/`CPL`/`SCF`/`CCF` — tasks 4 (second half), 6
+   and 7.
+
 ### 2. Naming the operand indexes
 
 **The hardware fact.** Theory section 2 has the table: three bits select one of
@@ -414,13 +516,35 @@ writes there.
 
 ### 3. Cycle costs for generated instructions
 
-**The hardware fact.** Any operand that is `(HL)` adds a bus access, and a bus
-access is 4 T-cycles. Theory section 3 has the numbers.
+**The hardware fact.** Every number in this step comes from one law:
+
+> **4 T-cycles per memory access, opcode fetch included.**
+
+Check it against the tables in tasks 4 and 6 before writing anything:
+
+| Instruction | Accesses | Cycles |
+| --- | --- | --- |
+| `LD B, C` | fetch | 4 |
+| `LD B, (HL)` | fetch, read | 8 |
+| `LD r, d8` | fetch, immediate | 8 |
+| `LD (HL), d8` | fetch, immediate, write | 12 |
+| `LD (a16), A` | fetch, immediate low, immediate high, write | 16 |
+| `ADD A, (HL)` | fetch, read | 8 |
+| `INC (HL)` | fetch, read, write | 12 |
 
 **What to write.** A small helper that answers "how many cycles does this
-instruction cost" from the operands involved, so the generating loops in tasks 4
-to 6 call it instead of embedding literals. Getting this from a rule rather than
-a table means you cannot get 63 of the 64 loads right and miss one.
+instruction cost", so the generating loops in tasks 4 to 6 call it instead of
+embedding literals. Getting this from a rule rather than a table means you cannot
+get 63 of the 64 loads right and miss one.
+
+**Count accesses, not operands.** The last row above is the trap. `INC (HL)` has
+one operand and two bus accesses, so a helper that asks "is any operand index 6"
+returns 8 and is wrong by a machine cycle.
+
+**The law stops at the 16-bit operations.** `INC BC` is 8 with a single fetch,
+because a 16-bit increment runs on its own unit rather than through the ALU. That
+is exactly why task 6 is written by hand and tasks 4 and 5 are generated: the
+generated blocks are the region where the law holds without exception.
 
 Do not skip this into "I will just write 4 or 8 inline". The rule is one line and
 it is the difference between a cycle-count bug that a test catches and one that
