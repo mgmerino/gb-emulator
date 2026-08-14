@@ -1,5 +1,4 @@
 from dataclasses import dataclass
-from enum import IntEnum
 
 from gameboy.bits import u8
 
@@ -47,14 +46,14 @@ def adc(a: int, b: int, carry: bool) -> tuple[int, Flags]:
     flags = Flags(
         z=result == 0,
         n=False,
-        h=(a & 0x0F) + (b & 0x0F) + (carry & 0x0F) > 0x0F,
+        h=(a & 0x0F) + (b & 0x0F) + carry > 0x0F,
         c=total > 0xFF,
     )
 
     return result, flags
 
 
-def sbc(a: int, b: int, carry: int) -> tuple[int, Flags]:
+def sbc(a: int, b: int, carry: bool) -> tuple[int, Flags]:
     total = a - b - carry
     result = u8(total)
 
@@ -124,5 +123,3 @@ def dec(value: int) -> tuple[int, Flags]:
         h=(value & 0x0F) == 0x0,  # low nibble was 0x0
     )
     return result, flags
-
-
