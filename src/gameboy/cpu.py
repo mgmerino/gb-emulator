@@ -12,8 +12,10 @@
 
 from collections.abc import Callable
 from dataclasses import dataclass
+from enum import IntEnum
 from typing import Final, Self
 
+from gameboy.alu import Flags
 from gameboy.bits import get_bit, high_byte, join_bytes, low_byte, u16
 from gameboy.memory import MemoryDevice
 
@@ -68,6 +70,19 @@ class Registers:
             ):
                 raise ValueError(f"{value!r} does not fit in register {name}")
             object.__setattr__(self, name, value)
+
+    def apply(self, flags: Flags) -> None:
+        if flags.z is not None:
+            self.z_flag = flags.z
+
+        if flags.n is not None:
+            self.n_flag = flags.n
+
+        if flags.h is not None:
+            self.h_flag = flags.h
+
+        if flags.c is not None:
+            self.c_flag = flags.c
 
     @classmethod
     def post_boot(cls) -> Self:
@@ -185,6 +200,57 @@ class CPU:
         instruction.execute(self)
 
         return instruction.cycles
+
+
+class Operand(IntEnum):
+    B = 0b000
+    C = 0b001
+    D = 0b010
+    E = 0b011
+    H = 0b100
+    L = 0b101
+    HL_POINTER = 0b110
+    A = 0b111
+
+
+def read_operand(cpu: CPU, operand: Operand) -> int:
+    match operand:
+        case Operand.HL_POINTER:
+            return cpu.bus.read(cpu.registers.hl)
+        case Operand.A:
+            return cpu.registers.a
+        case Operand.B:
+            return cpu.registers.b
+        case Operand.C:
+            return cpu.registers.c
+        case Operand.D:
+            return cpu.registers.d
+        case Operand.E:
+            return cpu.registers.e
+        case Operand.H:
+            return cpu.registers.h
+        case Operand.L:
+            return cpu.registers.l
+
+
+def write_operand(cpu: CPU, operand: Operand, value: int) -> None:
+    match operand:
+        case Operand.HL_POINTER:
+            cpu.bus.write(cpu.registers.hl, value)
+        case Operand.A:
+            cpu.registers.a = value
+        case Operand.B:
+            cpu.registers.b = value
+        case Operand.C:
+            cpu.registers.c = value
+        case Operand.D:
+            cpu.registers.d = value
+        case Operand.E:
+            cpu.registers.e = value
+        case Operand.H:
+            cpu.registers.h = value
+        case Operand.L:
+            cpu.registers.l = value
 
 
 def _nop(cpu: CPU) -> None:
