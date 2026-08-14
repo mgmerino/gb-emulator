@@ -14,6 +14,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Final, Self
 
+from gameboy.alu import Flags
 from gameboy.bits import get_bit, high_byte, join_bytes, low_byte, u16
 from gameboy.memory import MemoryDevice
 
@@ -68,6 +69,19 @@ class Registers:
             ):
                 raise ValueError(f"{value!r} does not fit in register {name}")
             object.__setattr__(self, name, value)
+
+    def apply(self, flags: Flags) -> None:
+        if flags.z is not None:
+            self.z_flag = flags.z
+
+        if flags.n is not None:
+            self.n_flag = flags.n
+
+        if flags.h is not None:
+            self.h_flag = flags.h
+
+        if flags.c is not None:
+            self.c_flag = flags.c
 
     @classmethod
     def post_boot(cls) -> Self:

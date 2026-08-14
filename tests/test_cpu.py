@@ -1,6 +1,7 @@
 import pytest
 from conftest import CpuRunning
 
+from gameboy.alu import Flags
 from gameboy.cpu import Registers, UnknownOpcodeError
 
 
@@ -185,6 +186,16 @@ def test_post_boot_matches_the_hardware_table() -> None:
     assert registers.l == 0x4D
     assert registers.pc == 0x0100
     assert registers.sp == 0xFFFE
+
+
+def test_apply_set_expected_values_other_flags_keep_pristine() -> None:
+    registers = Registers(c_flag=True)
+    flags = Flags(z=True)
+
+    registers.apply(flags)
+
+    assert registers.c_flag
+    assert registers.z_flag
 
 
 def test_post_boot_af_is_01b0() -> None:
