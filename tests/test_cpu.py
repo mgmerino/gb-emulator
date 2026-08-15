@@ -29,6 +29,18 @@ LOAD_BLOCK = [
     if opcode != 0x76  # HALT
 ]
 
+# The eight `00 rrr 110` opcodes and the register it targets.
+LD_IMMEDIATE: list[tuple[int, Operand]] = [
+    (0x06, Operand.B),  # LD B, d8
+    (0x0E, Operand.C),  # LD C, d8
+    (0x16, Operand.D),  # LD D, d8
+    (0x1E, Operand.E),  # LD E, d8
+    (0x26, Operand.H),  # LD H, d8
+    (0x2E, Operand.L),  # LD L, d8
+    (0x36, Operand.HL_POINTER),  # LD (HL), d8
+    (0x3E, Operand.A),  # LD A, d8
+]
+
 
 def test_pair_composes_from_its_halves(registers: Registers) -> None:
     registers.b = 0x23
@@ -452,3 +464,49 @@ def test_load_block_names_read_as_assembly() -> None:
     assert OPCODES[0x7F].name == "LD A, A"
 
 
+@pytest.mark.parametrize(
+    "opcode, dst",
+    LD_IMMEDIATE,
+    ids=[dst.name for _, dst in LD_IMMEDIATE],
+)
+def test_ld_immediate_stores_the_byte_that_follows_the_opcode(
+    cpu_running: CpuRunning, opcode: int, dst: Operand
+) -> None:
+    cpu = cpu_running(opcode, 0x5A)
+    cpu.registers.hl = 0xC001
+    write_operand(cpu, dst, 0xFF)  # ensure seed value
+    cycles = cpu.step()
+
+    assert cycles == (12 if dst is Operand.HL_POINTER else 8)
+    assert read_operand(cpu, dst) == 0x5A
+    assert cpu.registers.pc == 0x0102  # two bytes read, one instruction
+    assert cpu.registers.f == 0x00
+
+
+def test_the_byte_after_an_immediate_is_the_next_opcode(
+    cpu_running: CpuRunning,
+) -> None:
+    # if the immediate is not consumed, step two decodes 0x5A as an opcode
+    # instead of reaching the second instruction.
+
+    #                 LD B, 0x48  LD C, 0x9A
+    cpu = cpu_running(0x06, 0x48, 0x0E, 0x9A)
+    write_operand(cpu, Operand.B, 0xFF)  # seed value
+    write_operand(cpu, Operand.C, 0xFF)  # seed value
+    cpu.step()
+    cpu.step()
+
+    assert read_operand(cpu, Operand.B) == 0x48
+    assert read_operand(cpu, Operand.C) == 0x9A
+    assert cpu.registers.pc == 0x0104
+
+
+def test_ld_immediate_block_is_present_and_named() -> None:
+    assert OPCODES[0x06].name == "LD B, d8"
+    assert OPCODES[0x0E].name == "LD C, d8"
+    assert OPCODES[0x16].name == "LD D, d8"
+    assert OPCODES[0x1E].name == "LD E, d8"
+    assert OPCODES[0x26].name == "LD H, d8"
+    assert OPCODES[0x2E].name == "LD L, d8"
+    assert OPCODES[0x36].name == "LD (HL), d8"
+    assert OPCODES[0x3E].name == "LD A, d8"

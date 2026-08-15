@@ -300,6 +300,14 @@ def _make_ld(dst: Operand, src: Operand) -> Callable[[CPU], None]:
     return execute
 
 
+def _make_ld_immediate(dst: Operand) -> Callable[[CPU], None]:
+    def execute(cpu: CPU) -> None:
+        value = cpu.fetch_u8()
+        write_operand(cpu, dst, value)
+
+    return execute
+
+
 def _load_block() -> dict[int, Instruction]:
     instructions: dict[int, Instruction] = {}
 
@@ -319,9 +327,26 @@ def _load_block() -> dict[int, Instruction]:
     return instructions
 
 
+def _ld_immediate_block() -> dict[int, Instruction]:
+    instructions: dict[int, Instruction] = {}
+    # Opcodes: [0x06, 0x0E, 0x16, 0x1E, 0x26, 0x2E, 0x36, 0x3E]
+    # Registers:  B     C     D     E     H     L    (HL)   A
+
+    for opcode in range(0x06, 0x40, 8):  # 00 rrr 110
+        dst = Operand((opcode >> 3) & 0b111)
+
+        instructions[opcode] = Instruction(
+            f"LD {dst.assembly_name}, d8",
+            count_cycles(dst, immediates=1),
+            _make_ld_immediate(dst),
+        )
+    return instructions
+
+
 OPCODES: Final[dict[int, Instruction]] = {
     # Address         OPCODE     CYCLES
     0x00: Instruction("NOP", 4, _nop),
     0xC3: Instruction("JP a16", 16, _jp_a16),
+    **_ld_immediate_block(),
     **_load_block(),
 }
