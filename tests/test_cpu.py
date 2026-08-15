@@ -773,3 +773,110 @@ def test_a16_block_is_present_and_named() -> None:
     assert OPCODES[0xEA].name == "LD (a16), A"
     assert OPCODES[0xFA].name == "LD A, (a16)"
 
+
+# (offset, resulting address). Includes both ends of the page, so an
+# implementation that masks or wraps the sum fails at 0xFF.
+FF00_PAGE_OFFSETS = [(0x00, 0xFF00), (0x47, 0xFF47), (0xFF, 0xFFFF)]
+
+
+@pytest.mark.parametrize("offset, address", FF00_PAGE_OFFSETS)
+def test_ldh_store_writes_into_the_ff00_page(
+    cpu_running: CpuRunning, offset: int, address: int
+) -> None:
+    cpu = cpu_running(0xE0, offset)
+    cpu.registers.a = 0x5A
+
+    cycles = cpu.step()
+
+    assert cpu.bus.read(address) == 0x5A
+    assert cpu.bus.read(offset) == 0x00  # the base was added, not ignored
+    assert cpu.registers.a == 0x5A
+    assert cycles == 12
+    assert cpu.registers.pc == 0x0102  # opcode plus one immediate
+    assert cpu.registers.f == 0x00
+
+
+@pytest.mark.parametrize("offset, address", FF00_PAGE_OFFSETS)
+def test_ldh_load_reads_from_the_ff00_page(
+    cpu_running: CpuRunning, offset: int, address: int
+) -> None:
+    cpu = cpu_running(0xF0, offset)
+    cpu.bus.write(address, 0x5A)
+    cpu.bus.write(offset, 0xB6)  # what a missing 0xFF00 base would find instead
+    cpu.registers.a = 0xFF
+
+    cycles = cpu.step()
+
+    assert cpu.registers.a == 0x5A
+    assert cpu.bus.read(address) == 0x5A
+    assert cycles == 12
+    assert cpu.registers.pc == 0x0102
+    assert cpu.registers.f == 0x00
+
+
+@pytest.mark.parametrize("offset, address", FF00_PAGE_OFFSETS)
+def test_c_offset_store_writes_into_the_ff00_page(
+    cpu_running: CpuRunning, offset: int, address: int
+) -> None:
+    """`LD (C), A` carries no immediate: the offset comes from C.
+
+    The parens here do not mean what they mean in `LD (HL), A` — the address is
+    0xFF00 + C, not C.
+    """
+    cpu = cpu_running(0xE2)
+    cpu.registers.c = offset
+    cpu.registers.a = 0x5A
+
+    cycles = cpu.step()
+
+    assert cpu.bus.read(address) == 0x5A
+    assert cpu.bus.read(offset) == 0x00
+    assert cpu.registers.c == offset  # the offset register is not consumed
+    assert cycles == 8
+    assert cpu.registers.pc == 0x0101  # one byte, no immediate
+    assert cpu.registers.f == 0x00
+
+
+@pytest.mark.parametrize("offset, address", FF00_PAGE_OFFSETS)
+def test_c_offset_load_reads_from_the_ff00_page(
+    cpu_running: CpuRunning, offset: int, address: int
+) -> None:
+    cpu = cpu_running(0xF2)
+    cpu.registers.c = offset
+    cpu.bus.write(address, 0x5A)
+    cpu.bus.write(offset, 0xB6)
+    cpu.registers.a = 0xFF
+
+    cycles = cpu.step()
+
+    assert cpu.registers.a == 0x5A
+    assert cpu.registers.c == offset
+    assert cycles == 8
+    assert cpu.registers.pc == 0x0101
+    assert cpu.registers.f == 0x00
+
+
+def test_the_byte_after_an_ldh_opcode_is_not_decoded(cpu_running: CpuRunning) -> None:
+    """LDH consumes its immediate; LD (C), A has none to consume.
+
+    Run one of each back to back. If LDH left its offset in the stream, step two
+    decodes 0x47 (LD B, A) instead of reaching 0xE2.
+    """
+    #                 LDH (0x47), A  LD (C), A
+    cpu = cpu_running(0xE0, 0x47, 0xE2)
+    cpu.registers.a = 0x5A
+    cpu.registers.c = 0x80
+
+    cpu.step()
+    cpu.step()
+
+    assert cpu.bus.read(0xFF47) == 0x5A
+    assert cpu.bus.read(0xFF80) == 0x5A
+    assert cpu.registers.pc == 0x0103
+
+
+def test_ff00_page_block_is_present_and_named() -> None:
+    assert OPCODES[0xE0].name == "LDH (a8), A"
+    assert OPCODES[0xF0].name == "LDH A, (a8)"
+    assert OPCODES[0xE2].name == "LD (C), A"
+    assert OPCODES[0xF2].name == "LD A, (C)"
