@@ -22,25 +22,6 @@ REGISTER_OPERANDS = [
     Operand.A,
 ]
 
-# Decoded from the bit pattern, the same way the generator.
-LOAD_BLOCK = [
-    (opcode, Operand((opcode >> 3) & 0b111), Operand(opcode & 0b111))
-    for opcode in range(0x40, 0x80)
-    if opcode != 0x76  # HALT
-]
-
-# The eight `00 rrr 110` opcodes and the register it targets.
-LD_IMMEDIATE: list[tuple[int, Operand]] = [
-    (0x06, Operand.B),  # LD B, d8
-    (0x0E, Operand.C),  # LD C, d8
-    (0x16, Operand.D),  # LD D, d8
-    (0x1E, Operand.E),  # LD E, d8
-    (0x26, Operand.H),  # LD H, d8
-    (0x2E, Operand.L),  # LD L, d8
-    (0x36, Operand.HL_POINTER),  # LD (HL), d8
-    (0x3E, Operand.A),  # LD A, d8
-]
-
 
 def test_pair_composes_from_its_halves(registers: Registers) -> None:
     registers.b = 0x23
@@ -419,6 +400,26 @@ def test_count_cycles_charges_four_per_access() -> None:
     assert count_cycles(immediates=1) - count_cycles() == 4
 
 
+# Decoded from the bit pattern, the same way the generator.
+LOAD_BLOCK = [
+    (opcode, Operand((opcode >> 3) & 0b111), Operand(opcode & 0b111))
+    for opcode in range(0x40, 0x80)
+    if opcode != 0x76  # HALT
+]
+
+# The eight `00 rrr 110` opcodes and the register it targets.
+LD_IMMEDIATE: list[tuple[int, Operand]] = [
+    (0x06, Operand.B),  # LD B, d8
+    (0x0E, Operand.C),  # LD C, d8
+    (0x16, Operand.D),  # LD D, d8
+    (0x1E, Operand.E),  # LD E, d8
+    (0x26, Operand.H),  # LD H, d8
+    (0x2E, Operand.L),  # LD L, d8
+    (0x36, Operand.HL_POINTER),  # LD (HL), d8
+    (0x3E, Operand.A),  # LD A, d8
+]
+
+
 @pytest.mark.parametrize(
     "opcode, dst, src",
     LOAD_BLOCK,
@@ -510,3 +511,265 @@ def test_ld_immediate_block_is_present_and_named() -> None:
     assert OPCODES[0x2E].name == "LD L, d8"
     assert OPCODES[0x36].name == "LD (HL), d8"
     assert OPCODES[0x3E].name == "LD A, d8"
+
+
+@pytest.mark.parametrize("opcode, pair", [(0x02, "bc"), (0x12, "de")])
+def test_pair_store_writes_a_to_the_address_in_the_pair(
+    cpu_running: CpuRunning, opcode: int, pair: str
+) -> None:
+    cpu = cpu_running(opcode)
+    setattr(cpu.registers, pair, 0xC000)  # cpu.registers.bc = 0xC000
+    cpu.registers.a = 0xC5
+
+    cycles = cpu.step()
+
+    assert cpu.bus.read(0xC000) == 0xC5
+    assert cycles == 8
+    assert cpu.registers.a == 0xC5  # remains unchanged
+    assert cpu.registers.pc == 0x0101
+    assert cpu.registers.f == 0x00
+
+
+@pytest.mark.parametrize("opcode, pair", [(0x0A, "bc"), (0x1A, "de")])
+def test_pair_load_reads_into_a_from_the_address_in_the_pair(
+    cpu_running: CpuRunning, opcode: int, pair: str
+) -> None:
+    cpu = cpu_running(opcode)
+    cpu.bus.write(0xC0AB, 0xF2)  # wire the value that will be loaded
+    cpu.registers.a = 0xFF  # sanity check
+    setattr(cpu.registers, pair, 0xC0AB)  # cpu.registers.[bc|de] = 0xC0AB
+
+    cycles = cpu.step()
+
+    assert cpu.registers.a == 0xF2
+    assert cycles == 8
+    assert cpu.bus.read(0xC0AB) == 0xF2  # remains unchanged
+    assert cpu.registers.pc == 0x0101
+    assert cpu.registers.f == 0x00
+
+
+@pytest.mark.parametrize(
+    "opcode, pair", [(0x02, "bc"), (0x12, "de"), (0x0A, "bc"), (0x1A, "de")]
+)
+def test_pair_indirect_leaves_the_pointer_alone(
+    cpu_running: CpuRunning, opcode: int, pair: str
+) -> None:
+    cpu = cpu_running(opcode)
+    setattr(cpu.registers, pair, 0xC0AB)
+
+    cpu.step()
+
+    assert getattr(cpu.registers, pair) == 0xC0AB
+
+
+PAIR_ADDRESSES = {"bc": 0xC000, "de": 0xD000}
+PAIR_BYTES = {"bc": 0xB0, "de": 0xDE}
+
+
+@pytest.mark.parametrize(
+    "opcode, pair, other", [(0x02, "bc", "de"), (0x12, "de", "bc")]
+)
+def test_a_store_writes_only_through_the_pair_its_mnemonic_names(
+    cpu_running: CpuRunning, opcode: int, pair: str, other: str
+) -> None:
+    cpu = cpu_running(opcode)
+    cpu.registers.bc = PAIR_ADDRESSES["bc"]
+    cpu.registers.de = PAIR_ADDRESSES["de"]
+    cpu.registers.a = 0x5A
+
+    cpu.step()
+
+    assert cpu.bus.read(PAIR_ADDRESSES[pair]) == 0x5A
+    assert cpu.bus.read(PAIR_ADDRESSES[other]) == 0x00
+
+
+@pytest.mark.parametrize(
+    "opcode, pair, other", [(0x0A, "bc", "de"), (0x1A, "de", "bc")]
+)
+def test_a_load_reads_only_through_the_pair_its_mnemonic_names(
+    cpu_running: CpuRunning, opcode: int, pair: str, other: str
+) -> None:
+    cpu = cpu_running(opcode)
+    cpu.registers.bc = PAIR_ADDRESSES["bc"]
+    cpu.registers.de = PAIR_ADDRESSES["de"]
+    cpu.bus.write(PAIR_ADDRESSES["bc"], PAIR_BYTES["bc"])
+    cpu.bus.write(PAIR_ADDRESSES["de"], PAIR_BYTES["de"])
+    cpu.registers.a = 0xFF
+
+    cpu.step()
+
+    assert cpu.registers.a == PAIR_BYTES[pair]
+    assert cpu.registers.a != PAIR_BYTES[other]
+
+
+def test_pair_indirect_block_is_present_and_named() -> None:
+    assert OPCODES[0x02].name == "LD (BC), A"
+    assert OPCODES[0x12].name == "LD (DE), A"
+    assert OPCODES[0x0A].name == "LD A, (BC)"
+    assert OPCODES[0x1A].name == "LD A, (DE)"
+
+
+# (opcode, delta) — the pointer moves by delta *after* the access.
+HL_MOVE_STORES = [(0x22, 1), (0x32, -1)]
+HL_MOVE_LOADS = [(0x2A, 1), (0x3A, -1)]
+
+
+@pytest.mark.parametrize("opcode, delta", HL_MOVE_STORES)
+def test_hl_move_store_writes_a_then_moves_the_pointer(
+    cpu_running: CpuRunning, opcode: int, delta: int
+) -> None:
+    cpu = cpu_running(opcode)
+    cpu.registers.hl = 0xC000
+    cpu.registers.a = 0x5A
+
+    cycles = cpu.step()
+
+    assert cpu.bus.read(0xC000) == 0x5A
+    assert cpu.registers.hl == 0xC000 + delta
+    assert cpu.registers.a == 0x5A  # a store copies, it does not move
+    assert cycles == 8  # the pointer update never touches the bus
+    assert cpu.registers.pc == 0x0101
+    assert cpu.registers.f == 0x00
+
+
+@pytest.mark.parametrize("opcode, delta", HL_MOVE_LOADS)
+def test_hl_move_load_reads_into_a_then_moves_the_pointer(
+    cpu_running: CpuRunning, opcode: int, delta: int
+) -> None:
+    cpu = cpu_running(opcode)
+    cpu.registers.hl = 0xC000
+    cpu.bus.write(0xC000, 0x5A)
+    cpu.registers.a = 0xFF
+
+    cycles = cpu.step()
+
+    assert cpu.registers.a == 0x5A
+    assert cpu.registers.hl == 0xC000 + delta
+    assert cpu.bus.read(0xC000) == 0x5A  # the source is left alone
+    assert cycles == 8
+    assert cpu.registers.pc == 0x0101
+    assert cpu.registers.f == 0x00
+
+
+@pytest.mark.parametrize("opcode, delta", HL_MOVE_STORES)
+def test_hl_move_store_writes_at_the_address_it_started_on(
+    cpu_running: CpuRunning, opcode: int, delta: int
+) -> None:
+    """Post-increment, not pre-increment.
+
+    If the pointer moved before the write, the byte lands on the neighbour and
+    0xC000 stays zero. Asserting the neighbour is untouched is the only way to
+    tell the two orderings apart.
+    """
+    cpu = cpu_running(opcode)
+    cpu.registers.hl = 0xC000
+    cpu.registers.a = 0x5A
+
+    cpu.step()
+
+    assert cpu.bus.read(0xC000) == 0x5A
+    assert cpu.bus.read(0xC000 + delta) == 0x00
+
+
+@pytest.mark.parametrize("opcode, delta", HL_MOVE_LOADS)
+def test_hl_move_load_reads_the_address_it_started_on(
+    cpu_running: CpuRunning, opcode: int, delta: int
+) -> None:
+    """The same ordering check, from the read side.
+
+    Both addresses hold a byte, so a pointer that moved too early reads the
+    neighbour's value instead of failing against an empty cell.
+    """
+    cpu = cpu_running(opcode)
+    cpu.registers.hl = 0xC000
+    cpu.bus.write(0xC000, 0x5A)
+    cpu.bus.write(0xC000 + delta, 0xB6)
+
+    cpu.step()
+
+    assert cpu.registers.a == 0x5A
+
+
+@pytest.mark.parametrize(
+    "opcode, start, expected",
+    [
+        (0x22, 0xFFFF, 0x0000),
+        (0x2A, 0xFFFF, 0x0000),
+        (0x32, 0x0000, 0xFFFF),
+        (0x3A, 0x0000, 0xFFFF),
+    ],
+)
+def test_hl_move_wraps_at_the_edges_of_the_address_space(
+    cpu_running: CpuRunning, opcode: int, start: int, expected: int
+) -> None:
+    cpu = cpu_running(opcode)
+    cpu.registers.hl = start
+
+    cpu.step()
+
+    assert cpu.registers.hl == expected
+
+
+def test_hl_move_block_is_present_and_named() -> None:
+    assert OPCODES[0x22].name == "LD (HL+), A"
+    assert OPCODES[0x32].name == "LD (HL-), A"
+    assert OPCODES[0x2A].name == "LD A, (HL+)"
+    assert OPCODES[0x3A].name == "LD A, (HL-)"
+
+
+def test_ld_a16_a_writes_a_to_the_absolute_address(cpu_running: CpuRunning) -> None:
+    # 0x34 then 0x12 is little-endian for 0x1234. Asserting the byte-swapped
+    # address is untouched is what catches a fetch that reads them the wrong
+    # way round: every other assertion here would still pass.
+    cpu = cpu_running(0xEA, 0x34, 0x12)
+    cpu.registers.a = 0x5A
+
+    cycles = cpu.step()
+
+    assert cpu.bus.read(0x1234) == 0x5A
+    assert cpu.bus.read(0x3412) == 0x00
+    assert cpu.registers.a == 0x5A  # a store copies, it does not move
+    assert cycles == 16
+    assert cpu.registers.pc == 0x0103  # three bytes consumed
+    assert cpu.registers.f == 0x00
+
+
+def test_ld_a_a16_reads_a_from_the_absolute_address(cpu_running: CpuRunning) -> None:
+    cpu = cpu_running(0xFA, 0x34, 0x12)
+    cpu.bus.write(0x1234, 0x5A)
+    cpu.bus.write(0x3412, 0xB6)  # the byte-swapped address holds something else
+    cpu.registers.a = 0xFF
+
+    cycles = cpu.step()
+
+    assert cpu.registers.a == 0x5A
+    assert cpu.bus.read(0x1234) == 0x5A  # the source is left alone
+    assert cycles == 16
+    assert cpu.registers.pc == 0x0103
+    assert cpu.registers.f == 0x00
+
+
+def test_the_two_bytes_after_an_a16_opcode_are_not_decoded(
+    cpu_running: CpuRunning,
+) -> None:
+    """Both immediate bytes are consumed, so step two reaches the real opcode.
+
+    0x12 on its own is a valid instruction (LD (DE), A), so a partially
+    consumed address executes silently instead of crashing.
+    """
+    #                 LD (0x1234), A    LD A, 0x7E
+    cpu = cpu_running(0xEA, 0x34, 0x12, 0x3E, 0x7E)
+    cpu.registers.a = 0x5A
+
+    cpu.step()
+    cpu.step()
+
+    assert cpu.bus.read(0x1234) == 0x5A
+    assert cpu.registers.a == 0x7E
+    assert cpu.registers.pc == 0x0105
+
+
+def test_a16_block_is_present_and_named() -> None:
+    assert OPCODES[0xEA].name == "LD (a16), A"
+    assert OPCODES[0xFA].name == "LD A, (a16)"
+

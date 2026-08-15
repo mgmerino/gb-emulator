@@ -263,7 +263,9 @@ def write_operand(cpu: CPU, operand: Operand, value: int) -> None:
 T_CYCLES_PER_ACCESS = 4
 
 
-def count_cycles(*accesses: Operand, immediates: int = 0) -> int:
+def count_cycles(
+    *accesses: Operand, immediates: int = 0, data_accesses: int = 0
+) -> int:
     """Cost of one generated instruction:
     One access for the opcode fetch, one per immediate byte, and one for
     every operand access that reads memory.
@@ -273,7 +275,7 @@ def count_cycles(*accesses: Operand, immediates: int = 0) -> int:
         if op is Operand.HL_POINTER:
             total += 1  # memory access
 
-    return (total + immediates) * T_CYCLES_PER_ACCESS
+    return (total + immediates + data_accesses) * T_CYCLES_PER_ACCESS
 
 
 def _nop(cpu: CPU) -> None:
@@ -343,10 +345,102 @@ def _ld_immediate_block() -> dict[int, Instruction]:
     return instructions
 
 
+# Irregular instructions
+#
+# Loads that carry the accumulator to or from memory. They do not sit on a
+# shared bit pattern the way the LD and ALU blocks do, so each one is written
+# out by hand.
+#
+# | Opcode | Mnemonic     | Effect                      | Bytes | Cycles |
+# | ------ | ------------ | --------------------------- | ----- | ------ |
+# | 0x02   | LD (BC), A   | memory[BC] = A              | 1     | 8      |
+# | 0x0A   | LD A, (BC)   | A = memory[BC]              | 1     | 8      |
+# | 0x12   | LD (DE), A   | memory[DE] = A              | 1     | 8      |
+# | 0x1A   | LD A, (DE)   | A = memory[DE]              | 1     | 8      |
+# | 0x22   | LD (HL+), A  | memory[HL] = A, then HL++   | 1     | 8      |
+# | 0x2A   | LD A, (HL+)  | A = memory[HL], then HL++   | 1     | 8      |
+# | 0x32   | LD (HL-), A  | memory[HL] = A, then HL--   | 1     | 8      |
+# | 0x3A   | LD A, (HL-)  | A = memory[HL], then HL--   | 1     | 8      |
+# | 0xE0   | LDH (a8), A  | memory[0xFF00 + a8] = A     | 2     | 12     |
+# | 0xF0   | LDH A, (a8)  | A = memory[0xFF00 + a8]     | 2     | 12     |
+# | 0xE2   | LD (C), A    | memory[0xFF00 + C] = A      | 1     | 8      |
+# | 0xF2   | LD A, (C)    | A = memory[0xFF00 + C]      | 1     | 8      |
+# | 0xEA   | LD (a16), A  | memory[a16] = A             | 3     | 16     |
+# | 0xFA   | LD A, (a16)  | A = memory[a16]             | 3     | 16     |
+#
+# Notes:
+#   - The HL+/HL- forms access memory at HL *first*, then move the pointer.
+#     The move wraps at 16 bits and costs nothing: it never touches the bus.
+#   - The 0xFF00 page is the I/O register block. LDH and LD (C), A reach it
+#     with one byte of offset instead of a full address, which is why they are
+#     cheaper than LD (a16), A for the same destination.
+#   - None of these touches the flags.
+
+
+def _ld_bc_a(cpu: CPU) -> None:
+    cpu.bus.write(cpu.registers.bc, cpu.registers.a)
+
+
+def _ld_de_a(cpu: CPU) -> None:
+    cpu.bus.write(cpu.registers.de, cpu.registers.a)
+
+
+def _ld_a_bc(cpu: CPU) -> None:
+    cpu.registers.a = cpu.bus.read(cpu.registers.bc)
+
+
+def _ld_a_de(cpu: CPU) -> None:
+    cpu.registers.a = cpu.bus.read(cpu.registers.de)
+
+
+def _ld_hl_inc_a(cpu: CPU) -> None:
+    cpu.bus.write(cpu.registers.hl, cpu.registers.a)
+    cpu.registers.hl = u16(cpu.registers.hl + 1)
+
+
+def _ld_hl_dec_a(cpu: CPU) -> None:
+    cpu.bus.write(cpu.registers.hl, cpu.registers.a)
+    cpu.registers.hl = u16(cpu.registers.hl - 1)
+
+
+def _ld_a_hl_inc(cpu: CPU) -> None:
+    cpu.registers.a = cpu.bus.read(cpu.registers.hl)
+    cpu.registers.hl = u16(cpu.registers.hl + 1)
+
+
+def _ld_a_hl_dec(cpu: CPU) -> None:
+    cpu.registers.a = cpu.bus.read(cpu.registers.hl)
+    cpu.registers.hl = u16(cpu.registers.hl - 1)
+
+
+def _ld_a16_a(cpu: CPU) -> None:
+    address = cpu.fetch_u16()
+    cpu.bus.write(address, cpu.registers.a)
+
+
+def _ld_a_a16(cpu: CPU) -> None:
+    address = cpu.fetch_u16()
+    cpu.registers.a = cpu.bus.read(address)
+
+
 OPCODES: Final[dict[int, Instruction]] = {
     # Address         OPCODE     CYCLES
     0x00: Instruction("NOP", 4, _nop),
     0xC3: Instruction("JP a16", 16, _jp_a16),
+    0x02: Instruction("LD (BC), A", 8, _ld_bc_a),
+    0x12: Instruction("LD (DE), A", 8, _ld_de_a),
+    0x0A: Instruction("LD A, (BC)", 8, _ld_a_bc),
+    0x1A: Instruction("LD A, (DE)", 8, _ld_a_de),
+    0x22: Instruction("LD (HL+), A", count_cycles(Operand.HL_POINTER), _ld_hl_inc_a),
+    0x32: Instruction("LD (HL-), A", count_cycles(Operand.HL_POINTER), _ld_hl_dec_a),
+    0x2A: Instruction("LD A, (HL+)", count_cycles(Operand.HL_POINTER), _ld_a_hl_inc),
+    0x3A: Instruction("LD A, (HL-)", count_cycles(Operand.HL_POINTER), _ld_a_hl_dec),
+    0xEA: Instruction(
+        "LD (a16), A", count_cycles(Operand.A, immediates=2, data_accesses=1), _ld_a16_a
+    ),
+    0xFA: Instruction(
+        "LD A, (a16)", count_cycles(Operand.A, immediates=2, data_accesses=1), _ld_a_a16
+    ),
     **_ld_immediate_block(),
     **_load_block(),
 }
