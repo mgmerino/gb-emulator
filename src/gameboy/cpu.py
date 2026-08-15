@@ -212,6 +212,13 @@ class Operand(IntEnum):
     HL_POINTER = 0b110
     A = 0b111
 
+    @property
+    def assembly_name(self) -> str:
+        if self is Operand.HL_POINTER:
+            return "(HL)"
+
+        return self.name
+
 
 def read_operand(cpu: CPU, operand: Operand) -> int:
     match operand:
@@ -253,6 +260,22 @@ def write_operand(cpu: CPU, operand: Operand, value: int) -> None:
             cpu.registers.l = value
 
 
+T_CYCLES_PER_ACCESS = 4
+
+
+def count_cycles(*accesses: Operand, immediates: int = 0) -> int:
+    """Cost of one generated instruction:
+    One access for the opcode fetch, one per immediate byte, and one for
+    every operand access that reads memory.
+    """
+    total = 1  # the fetch cost one
+    for op in accesses:
+        if op is Operand.HL_POINTER:
+            total += 1  # memory access
+
+    return (total + immediates) * T_CYCLES_PER_ACCESS
+
+
 def _nop(cpu: CPU) -> None:
     # NOP's job is to pass four cycles and advance PC by one, and fetch_u8
     # already advanced PC.
@@ -264,8 +287,66 @@ def _jp_a16(cpu: CPU) -> None:
     cpu.registers.pc = cpu.fetch_u16()
 
 
+# ----------
+# Load Block
+# ----------
+
+
+def _make_ld(dst: Operand, src: Operand) -> Callable[[CPU], None]:
+    def execute(cpu: CPU) -> None:
+        value = read_operand(cpu, src)
+        write_operand(cpu, dst, value)
+
+    return execute
+
+
+def _make_ld_immediate(dst: Operand) -> Callable[[CPU], None]:
+    def execute(cpu: CPU) -> None:
+        value = cpu.fetch_u8()
+        write_operand(cpu, dst, value)
+
+    return execute
+
+
+def _load_block() -> dict[int, Instruction]:
+    instructions: dict[int, Instruction] = {}
+
+    for opcode in range(0x40, 0x80):
+        if opcode == 0x76:
+            # 0x76 is HALT. Nothing to do here.
+            continue
+
+        dst = Operand((opcode >> 3) & 0b111)
+        src = Operand(opcode & 0b111)
+
+        instructions[opcode] = Instruction(
+            f"LD {dst.assembly_name}, {src.assembly_name}",
+            count_cycles(dst, src),
+            _make_ld(dst, src),
+        )
+    return instructions
+
+
+def _ld_immediate_block() -> dict[int, Instruction]:
+    instructions: dict[int, Instruction] = {}
+    # Opcodes: [0x06, 0x0E, 0x16, 0x1E, 0x26, 0x2E, 0x36, 0x3E]
+    # Registers:  B     C     D     E     H     L    (HL)   A
+
+    for opcode in range(0x06, 0x40, 8):  # 00 rrr 110
+        dst = Operand((opcode >> 3) & 0b111)
+
+        instructions[opcode] = Instruction(
+            f"LD {dst.assembly_name}, d8",
+            count_cycles(dst, immediates=1),
+            _make_ld_immediate(dst),
+        )
+    return instructions
+
+
 OPCODES: Final[dict[int, Instruction]] = {
     # Address         OPCODE     CYCLES
     0x00: Instruction("NOP", 4, _nop),
     0xC3: Instruction("JP a16", 16, _jp_a16),
+    **_ld_immediate_block(),
+    **_load_block(),
 }

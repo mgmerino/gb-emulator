@@ -397,7 +397,7 @@ the ALU block would otherwise end with the same four `if ... is not None` lines,
 so that belongs in one place:
 
 ```python
-def apply(self, flags: Flags) -> None: ...   # a method on Registers
+def apply(self, flags: Flags) -> None: ...  # a method on Registers
 ```
 
 It writes only the fields that are not `None`, which is the whole point of the

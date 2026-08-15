@@ -3,9 +3,11 @@ from conftest import CpuRunning
 
 from gameboy.alu import Flags
 from gameboy.cpu import (
+    OPCODES,
     Operand,
     Registers,
     UnknownOpcodeError,
+    count_cycles,
     read_operand,
     write_operand,
 )
@@ -18,6 +20,25 @@ REGISTER_OPERANDS = [
     Operand.H,
     Operand.L,
     Operand.A,
+]
+
+# Decoded from the bit pattern, the same way the generator.
+LOAD_BLOCK = [
+    (opcode, Operand((opcode >> 3) & 0b111), Operand(opcode & 0b111))
+    for opcode in range(0x40, 0x80)
+    if opcode != 0x76  # HALT
+]
+
+# The eight `00 rrr 110` opcodes and the register it targets.
+LD_IMMEDIATE: list[tuple[int, Operand]] = [
+    (0x06, Operand.B),  # LD B, d8
+    (0x0E, Operand.C),  # LD C, d8
+    (0x16, Operand.D),  # LD D, d8
+    (0x1E, Operand.E),  # LD E, d8
+    (0x26, Operand.H),  # LD H, d8
+    (0x2E, Operand.L),  # LD L, d8
+    (0x36, Operand.HL_POINTER),  # LD (HL), d8
+    (0x3E, Operand.A),  # LD A, d8
 ]
 
 
@@ -260,6 +281,23 @@ def test_jp_sets_pc_to_its_operand_and_costs_sixteen_cycles(
     assert cpu.registers.pc == 0x0150
 
 
+def test_ld_copies_the_source_register_and_leaves_it_intact(
+    cpu_running: CpuRunning,
+) -> None:
+    cpu = cpu_running(0x41)
+    cpu.registers.b = 0xFF
+    cpu.registers.c = 0x5A
+
+    assert cpu.step() == 4
+    assert cpu.registers.b == 0x5A
+    assert cpu.registers.c == 0x5A
+    assert cpu.registers.pc == 0x0101
+    assert not cpu.registers.z_flag
+    assert not cpu.registers.n_flag
+    assert not cpu.registers.h_flag
+    assert not cpu.registers.c_flag
+
+
 def test_unknown_opcode_raises_with_the_opcode_and_its_address(
     cpu_running: CpuRunning,
 ) -> None:
@@ -342,3 +380,133 @@ def test_writing_an_unmasked_value_to_a_register_operand_is_rejected(
 
     with pytest.raises(ValueError, match="register b"):
         write_operand(cpu, Operand.B, 0x1FF)
+
+
+@pytest.mark.parametrize(
+    "expected, accesses, immediates",
+    [
+        # No operands at all: the opcode fetch is still one access.
+        (4, (), 0),
+        # Register operands are wires inside the chip and cost nothing.
+        (4, (Operand.B, Operand.C), 0),
+        # Index 6 is a bus access wherever it appears.
+        (8, (Operand.B, Operand.HL_POINTER), 0),
+        (8, (Operand.HL_POINTER, Operand.B), 0),
+        (8, (Operand.HL_POINTER,), 0),
+        # An immediate byte lives in the instruction stream, which is memory.
+        (8, (), 1),
+        (8, (Operand.B,), 1),
+        (12, (Operand.HL_POINTER,), 1),
+        (12, (), 2),
+        # Read-modify-write passes the same operand twice, because the
+        # instruction touches it twice. Free for a register, charged for memory.
+        (4, (Operand.B, Operand.B), 0),
+        (12, (Operand.HL_POINTER, Operand.HL_POINTER), 0),
+        # The widest operation the rule covers: three instruction bytes and a
+        # write.
+        (16, (Operand.HL_POINTER,), 2),
+    ],
+)
+def test_count_cycles_counts_memory_accesses(
+    expected: int, accesses: tuple[Operand, ...], immediates: int
+) -> None:
+    assert count_cycles(*accesses, immediates=immediates) == expected
+
+
+def test_count_cycles_charges_four_per_access() -> None:
+    assert count_cycles() == 4
+    assert count_cycles(Operand.HL_POINTER) - count_cycles(Operand.B) == 4
+    assert count_cycles(immediates=1) - count_cycles() == 4
+
+
+@pytest.mark.parametrize(
+    "opcode, dst, src",
+    LOAD_BLOCK,
+    ids=lambda param: f"{param:#04x}" if isinstance(param, int) else param.name,
+)
+def test_load_block_copies_source_to_destination(
+    cpu_running: CpuRunning, opcode: int, dst: Operand, src: Operand
+) -> None:
+    cpu = cpu_running(opcode)
+    cpu.registers.hl = 0xC000
+    # Destination first, so it holds something the source will have to
+    # overwrite: an implementation that read `dst` instead of `src` would
+    # otherwise pass.
+    write_operand(cpu, dst, 0xFF)
+    write_operand(cpu, src, 0x5A)
+
+    cycles = cpu.step()
+
+    assert read_operand(cpu, dst) == 0x5A
+    assert cycles == (8 if Operand.HL_POINTER in (dst, src) else 4)
+    assert cpu.registers.pc == 0x0101
+    assert cpu.registers.f == 0x00  # the load block never touches flags
+
+
+def test_load_block_covers_every_opcode_except_halt() -> None:
+    halt = 0x76
+    block = set(range(0x40, 0x80))
+
+    assert OPCODES.keys() & block == block - {halt}
+
+
+def test_halt_is_not_a_load(cpu_running: CpuRunning) -> None:
+    opcode = 0x76
+    cpu = cpu_running(opcode)
+    with pytest.raises(UnknownOpcodeError, match="unknown opcode 0x76"):
+        cpu.step()
+
+
+def test_load_block_names_read_as_assembly() -> None:
+    assert OPCODES[0x41].name == "LD B, C"
+    assert OPCODES[0x46].name == "LD B, (HL)"
+    assert OPCODES[0x70].name == "LD (HL), B"
+    assert OPCODES[0x7F].name == "LD A, A"
+
+
+@pytest.mark.parametrize(
+    "opcode, dst",
+    LD_IMMEDIATE,
+    ids=[dst.name for _, dst in LD_IMMEDIATE],
+)
+def test_ld_immediate_stores_the_byte_that_follows_the_opcode(
+    cpu_running: CpuRunning, opcode: int, dst: Operand
+) -> None:
+    cpu = cpu_running(opcode, 0x5A)
+    cpu.registers.hl = 0xC001
+    write_operand(cpu, dst, 0xFF)  # ensure seed value
+    cycles = cpu.step()
+
+    assert cycles == (12 if dst is Operand.HL_POINTER else 8)
+    assert read_operand(cpu, dst) == 0x5A
+    assert cpu.registers.pc == 0x0102  # two bytes read, one instruction
+    assert cpu.registers.f == 0x00
+
+
+def test_the_byte_after_an_immediate_is_the_next_opcode(
+    cpu_running: CpuRunning,
+) -> None:
+    # if the immediate is not consumed, step two decodes 0x5A as an opcode
+    # instead of reaching the second instruction.
+
+    #                 LD B, 0x48  LD C, 0x9A
+    cpu = cpu_running(0x06, 0x48, 0x0E, 0x9A)
+    write_operand(cpu, Operand.B, 0xFF)  # seed value
+    write_operand(cpu, Operand.C, 0xFF)  # seed value
+    cpu.step()
+    cpu.step()
+
+    assert read_operand(cpu, Operand.B) == 0x48
+    assert read_operand(cpu, Operand.C) == 0x9A
+    assert cpu.registers.pc == 0x0104
+
+
+def test_ld_immediate_block_is_present_and_named() -> None:
+    assert OPCODES[0x06].name == "LD B, d8"
+    assert OPCODES[0x0E].name == "LD C, d8"
+    assert OPCODES[0x16].name == "LD D, d8"
+    assert OPCODES[0x1E].name == "LD E, d8"
+    assert OPCODES[0x26].name == "LD H, d8"
+    assert OPCODES[0x2E].name == "LD L, d8"
+    assert OPCODES[0x36].name == "LD (HL), d8"
+    assert OPCODES[0x3E].name == "LD A, d8"
