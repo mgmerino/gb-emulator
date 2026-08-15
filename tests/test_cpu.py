@@ -715,3 +715,61 @@ def test_hl_move_block_is_present_and_named() -> None:
     assert OPCODES[0x32].name == "LD (HL-), A"
     assert OPCODES[0x2A].name == "LD A, (HL+)"
     assert OPCODES[0x3A].name == "LD A, (HL-)"
+
+
+def test_ld_a16_a_writes_a_to_the_absolute_address(cpu_running: CpuRunning) -> None:
+    # 0x34 then 0x12 is little-endian for 0x1234. Asserting the byte-swapped
+    # address is untouched is what catches a fetch that reads them the wrong
+    # way round: every other assertion here would still pass.
+    cpu = cpu_running(0xEA, 0x34, 0x12)
+    cpu.registers.a = 0x5A
+
+    cycles = cpu.step()
+
+    assert cpu.bus.read(0x1234) == 0x5A
+    assert cpu.bus.read(0x3412) == 0x00
+    assert cpu.registers.a == 0x5A  # a store copies, it does not move
+    assert cycles == 16
+    assert cpu.registers.pc == 0x0103  # three bytes consumed
+    assert cpu.registers.f == 0x00
+
+
+def test_ld_a_a16_reads_a_from_the_absolute_address(cpu_running: CpuRunning) -> None:
+    cpu = cpu_running(0xFA, 0x34, 0x12)
+    cpu.bus.write(0x1234, 0x5A)
+    cpu.bus.write(0x3412, 0xB6)  # the byte-swapped address holds something else
+    cpu.registers.a = 0xFF
+
+    cycles = cpu.step()
+
+    assert cpu.registers.a == 0x5A
+    assert cpu.bus.read(0x1234) == 0x5A  # the source is left alone
+    assert cycles == 16
+    assert cpu.registers.pc == 0x0103
+    assert cpu.registers.f == 0x00
+
+
+def test_the_two_bytes_after_an_a16_opcode_are_not_decoded(
+    cpu_running: CpuRunning,
+) -> None:
+    """Both immediate bytes are consumed, so step two reaches the real opcode.
+
+    0x12 on its own is a valid instruction (LD (DE), A), so a partially
+    consumed address executes silently instead of crashing.
+    """
+    #                 LD (0x1234), A    LD A, 0x7E
+    cpu = cpu_running(0xEA, 0x34, 0x12, 0x3E, 0x7E)
+    cpu.registers.a = 0x5A
+
+    cpu.step()
+    cpu.step()
+
+    assert cpu.bus.read(0x1234) == 0x5A
+    assert cpu.registers.a == 0x7E
+    assert cpu.registers.pc == 0x0105
+
+
+def test_a16_block_is_present_and_named() -> None:
+    assert OPCODES[0xEA].name == "LD (a16), A"
+    assert OPCODES[0xFA].name == "LD A, (a16)"
+

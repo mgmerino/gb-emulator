@@ -263,7 +263,9 @@ def write_operand(cpu: CPU, operand: Operand, value: int) -> None:
 T_CYCLES_PER_ACCESS = 4
 
 
-def count_cycles(*accesses: Operand, immediates: int = 0) -> int:
+def count_cycles(
+    *accesses: Operand, immediates: int = 0, data_accesses: int = 0
+) -> int:
     """Cost of one generated instruction:
     One access for the opcode fetch, one per immediate byte, and one for
     every operand access that reads memory.
@@ -273,7 +275,7 @@ def count_cycles(*accesses: Operand, immediates: int = 0) -> int:
         if op is Operand.HL_POINTER:
             total += 1  # memory access
 
-    return (total + immediates) * T_CYCLES_PER_ACCESS
+    return (total + immediates + data_accesses) * T_CYCLES_PER_ACCESS
 
 
 def _nop(cpu: CPU) -> None:
@@ -411,6 +413,16 @@ def _ld_a_hl_dec(cpu: CPU) -> None:
     cpu.registers.hl = u16(cpu.registers.hl - 1)
 
 
+def _ld_a16_a(cpu: CPU) -> None:
+    address = cpu.fetch_u16()
+    cpu.bus.write(address, cpu.registers.a)
+
+
+def _ld_a_a16(cpu: CPU) -> None:
+    address = cpu.fetch_u16()
+    cpu.registers.a = cpu.bus.read(address)
+
+
 OPCODES: Final[dict[int, Instruction]] = {
     # Address         OPCODE     CYCLES
     0x00: Instruction("NOP", 4, _nop),
@@ -423,6 +435,12 @@ OPCODES: Final[dict[int, Instruction]] = {
     0x32: Instruction("LD (HL-), A", count_cycles(Operand.HL_POINTER), _ld_hl_dec_a),
     0x2A: Instruction("LD A, (HL+)", count_cycles(Operand.HL_POINTER), _ld_a_hl_inc),
     0x3A: Instruction("LD A, (HL-)", count_cycles(Operand.HL_POINTER), _ld_a_hl_dec),
+    0xEA: Instruction(
+        "LD (a16), A", count_cycles(Operand.A, immediates=2, data_accesses=1), _ld_a16_a
+    ),
+    0xFA: Instruction(
+        "LD A, (a16)", count_cycles(Operand.A, immediates=2, data_accesses=1), _ld_a_a16
+    ),
     **_ld_immediate_block(),
     **_load_block(),
 }
