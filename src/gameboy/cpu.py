@@ -212,6 +212,13 @@ class Operand(IntEnum):
     HL_POINTER = 0b110
     A = 0b111
 
+    @property
+    def assembly_name(self) -> str:
+        if self is Operand.HL_POINTER:
+            return "(HL)"
+
+        return self.name
+
 
 def read_operand(cpu: CPU, operand: Operand) -> int:
     match operand:
@@ -280,8 +287,41 @@ def _jp_a16(cpu: CPU) -> None:
     cpu.registers.pc = cpu.fetch_u16()
 
 
+# ----------
+# Load Block
+# ----------
+
+
+def _make_ld(dst: Operand, src: Operand) -> Callable[[CPU], None]:
+    def execute(cpu: CPU) -> None:
+        value = read_operand(cpu, src)
+        write_operand(cpu, dst, value)
+
+    return execute
+
+
+def _load_block() -> dict[int, Instruction]:
+    instructions: dict[int, Instruction] = {}
+
+    for opcode in range(0x40, 0x80):
+        if opcode == 0x76:
+            # 0x76 is HALT. Nothing to do here.
+            continue
+
+        dst = Operand((opcode >> 3) & 0b111)
+        src = Operand(opcode & 0b111)
+
+        instructions[opcode] = Instruction(
+            f"LD {dst.assembly_name}, {src.assembly_name}",
+            count_cycles(dst, src),
+            _make_ld(dst, src),
+        )
+    return instructions
+
+
 OPCODES: Final[dict[int, Instruction]] = {
     # Address         OPCODE     CYCLES
     0x00: Instruction("NOP", 4, _nop),
     0xC3: Instruction("JP a16", 16, _jp_a16),
+    **_load_block(),
 }

@@ -3,6 +3,7 @@ from conftest import CpuRunning
 
 from gameboy.alu import Flags
 from gameboy.cpu import (
+    OPCODES,
     Operand,
     Registers,
     UnknownOpcodeError,
@@ -19,6 +20,13 @@ REGISTER_OPERANDS = [
     Operand.H,
     Operand.L,
     Operand.A,
+]
+
+# Decoded from the bit pattern, the same way the generator.
+LOAD_BLOCK = [
+    (opcode, Operand((opcode >> 3) & 0b111), Operand(opcode & 0b111))
+    for opcode in range(0x40, 0x80)
+    if opcode != 0x76  # HALT
 ]
 
 
@@ -261,6 +269,23 @@ def test_jp_sets_pc_to_its_operand_and_costs_sixteen_cycles(
     assert cpu.registers.pc == 0x0150
 
 
+def test_ld_copies_the_source_register_and_leaves_it_intact(
+    cpu_running: CpuRunning,
+) -> None:
+    cpu = cpu_running(0x41)
+    cpu.registers.b = 0xFF
+    cpu.registers.c = 0x5A
+
+    assert cpu.step() == 4
+    assert cpu.registers.b == 0x5A
+    assert cpu.registers.c == 0x5A
+    assert cpu.registers.pc == 0x0101
+    assert not cpu.registers.z_flag
+    assert not cpu.registers.n_flag
+    assert not cpu.registers.h_flag
+    assert not cpu.registers.c_flag
+
+
 def test_unknown_opcode_raises_with_the_opcode_and_its_address(
     cpu_running: CpuRunning,
 ) -> None:
@@ -380,3 +405,50 @@ def test_count_cycles_charges_four_per_access() -> None:
     assert count_cycles() == 4
     assert count_cycles(Operand.HL_POINTER) - count_cycles(Operand.B) == 4
     assert count_cycles(immediates=1) - count_cycles() == 4
+
+
+@pytest.mark.parametrize(
+    "opcode, dst, src",
+    LOAD_BLOCK,
+    ids=lambda param: f"{param:#04x}" if isinstance(param, int) else param.name,
+)
+def test_load_block_copies_source_to_destination(
+    cpu_running: CpuRunning, opcode: int, dst: Operand, src: Operand
+) -> None:
+    cpu = cpu_running(opcode)
+    cpu.registers.hl = 0xC000
+    # Destination first, so it holds something the source will have to
+    # overwrite: an implementation that read `dst` instead of `src` would
+    # otherwise pass.
+    write_operand(cpu, dst, 0xFF)
+    write_operand(cpu, src, 0x5A)
+
+    cycles = cpu.step()
+
+    assert read_operand(cpu, dst) == 0x5A
+    assert cycles == (8 if Operand.HL_POINTER in (dst, src) else 4)
+    assert cpu.registers.pc == 0x0101
+    assert cpu.registers.f == 0x00  # the load block never touches flags
+
+
+def test_load_block_covers_every_opcode_except_halt() -> None:
+    halt = 0x76
+    block = set(range(0x40, 0x80))
+
+    assert OPCODES.keys() & block == block - {halt}
+
+
+def test_halt_is_not_a_load(cpu_running: CpuRunning) -> None:
+    opcode = 0x76
+    cpu = cpu_running(opcode)
+    with pytest.raises(UnknownOpcodeError, match="unknown opcode 0x76"):
+        cpu.step()
+
+
+def test_load_block_names_read_as_assembly() -> None:
+    assert OPCODES[0x41].name == "LD B, C"
+    assert OPCODES[0x46].name == "LD B, (HL)"
+    assert OPCODES[0x70].name == "LD (HL), B"
+    assert OPCODES[0x7F].name == "LD A, A"
+
+
