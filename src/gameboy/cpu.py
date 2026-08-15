@@ -423,6 +423,26 @@ def _ld_a_a16(cpu: CPU) -> None:
     cpu.registers.a = cpu.bus.read(address)
 
 
+def _ldh_a8_a(cpu: CPU) -> None:
+    address = u16(0xFF00 + cpu.fetch_u8())
+    cpu.bus.write(address, cpu.registers.a)
+
+
+def _ldh_a_a8(cpu: CPU) -> None:
+    address = u16(0xFF00 + cpu.fetch_u8())
+    cpu.registers.a = cpu.bus.read(address)
+
+
+def _ld_c_a(cpu: CPU) -> None:
+    address = u16(0xFF00 + cpu.registers.c)
+    cpu.bus.write(address, cpu.registers.a)
+
+
+def _ld_a_c(cpu: CPU) -> None:
+    address = u16(0xFF00 + cpu.registers.c)
+    cpu.registers.a = cpu.bus.read(address)
+
+
 OPCODES: Final[dict[int, Instruction]] = {
     # Address         OPCODE     CYCLES
     0x00: Instruction("NOP", 4, _nop),
@@ -441,6 +461,10 @@ OPCODES: Final[dict[int, Instruction]] = {
     0xFA: Instruction(
         "LD A, (a16)", count_cycles(Operand.A, immediates=2, data_accesses=1), _ld_a_a16
     ),
+    0xE0: Instruction("LDH (a8), A", 12, _ldh_a8_a),
+    0xF0: Instruction("LDH A, (a8)", 12, _ldh_a_a8),
+    0xE2: Instruction("LD (C), A", 8, _ld_c_a),
+    0xF2: Instruction("LD A, (C)", 8, _ld_a_c),
     **_ld_immediate_block(),
     **_load_block(),
 }
