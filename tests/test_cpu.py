@@ -607,3 +607,111 @@ def test_pair_indirect_block_is_present_and_named() -> None:
     assert OPCODES[0x12].name == "LD (DE), A"
     assert OPCODES[0x0A].name == "LD A, (BC)"
     assert OPCODES[0x1A].name == "LD A, (DE)"
+
+
+# (opcode, delta) — the pointer moves by delta *after* the access.
+HL_MOVE_STORES = [(0x22, 1), (0x32, -1)]
+HL_MOVE_LOADS = [(0x2A, 1), (0x3A, -1)]
+
+
+@pytest.mark.parametrize("opcode, delta", HL_MOVE_STORES)
+def test_hl_move_store_writes_a_then_moves_the_pointer(
+    cpu_running: CpuRunning, opcode: int, delta: int
+) -> None:
+    cpu = cpu_running(opcode)
+    cpu.registers.hl = 0xC000
+    cpu.registers.a = 0x5A
+
+    cycles = cpu.step()
+
+    assert cpu.bus.read(0xC000) == 0x5A
+    assert cpu.registers.hl == 0xC000 + delta
+    assert cpu.registers.a == 0x5A  # a store copies, it does not move
+    assert cycles == 8  # the pointer update never touches the bus
+    assert cpu.registers.pc == 0x0101
+    assert cpu.registers.f == 0x00
+
+
+@pytest.mark.parametrize("opcode, delta", HL_MOVE_LOADS)
+def test_hl_move_load_reads_into_a_then_moves_the_pointer(
+    cpu_running: CpuRunning, opcode: int, delta: int
+) -> None:
+    cpu = cpu_running(opcode)
+    cpu.registers.hl = 0xC000
+    cpu.bus.write(0xC000, 0x5A)
+    cpu.registers.a = 0xFF
+
+    cycles = cpu.step()
+
+    assert cpu.registers.a == 0x5A
+    assert cpu.registers.hl == 0xC000 + delta
+    assert cpu.bus.read(0xC000) == 0x5A  # the source is left alone
+    assert cycles == 8
+    assert cpu.registers.pc == 0x0101
+    assert cpu.registers.f == 0x00
+
+
+@pytest.mark.parametrize("opcode, delta", HL_MOVE_STORES)
+def test_hl_move_store_writes_at_the_address_it_started_on(
+    cpu_running: CpuRunning, opcode: int, delta: int
+) -> None:
+    """Post-increment, not pre-increment.
+
+    If the pointer moved before the write, the byte lands on the neighbour and
+    0xC000 stays zero. Asserting the neighbour is untouched is the only way to
+    tell the two orderings apart.
+    """
+    cpu = cpu_running(opcode)
+    cpu.registers.hl = 0xC000
+    cpu.registers.a = 0x5A
+
+    cpu.step()
+
+    assert cpu.bus.read(0xC000) == 0x5A
+    assert cpu.bus.read(0xC000 + delta) == 0x00
+
+
+@pytest.mark.parametrize("opcode, delta", HL_MOVE_LOADS)
+def test_hl_move_load_reads_the_address_it_started_on(
+    cpu_running: CpuRunning, opcode: int, delta: int
+) -> None:
+    """The same ordering check, from the read side.
+
+    Both addresses hold a byte, so a pointer that moved too early reads the
+    neighbour's value instead of failing against an empty cell.
+    """
+    cpu = cpu_running(opcode)
+    cpu.registers.hl = 0xC000
+    cpu.bus.write(0xC000, 0x5A)
+    cpu.bus.write(0xC000 + delta, 0xB6)
+
+    cpu.step()
+
+    assert cpu.registers.a == 0x5A
+
+
+@pytest.mark.parametrize(
+    "opcode, start, expected",
+    [
+        (0x22, 0xFFFF, 0x0000),
+        (0x2A, 0xFFFF, 0x0000),
+        (0x32, 0x0000, 0xFFFF),
+        (0x3A, 0x0000, 0xFFFF),
+    ],
+)
+def test_hl_move_wraps_at_the_edges_of_the_address_space(
+    cpu_running: CpuRunning, opcode: int, start: int, expected: int
+) -> None:
+    cpu = cpu_running(opcode)
+    cpu.registers.hl = start
+
+    cpu.step()
+
+    assert cpu.registers.hl == expected
+
+
+def test_hl_move_block_is_present_and_named() -> None:
+    assert OPCODES[0x22].name == "LD (HL+), A"
+    assert OPCODES[0x32].name == "LD (HL-), A"
+    assert OPCODES[0x2A].name == "LD A, (HL+)"
+    assert OPCODES[0x3A].name == "LD A, (HL-)"
