@@ -343,10 +343,33 @@ def _ld_immediate_block() -> dict[int, Instruction]:
     return instructions
 
 
+# Irregular instructions
+
+
+def _ld_bc_a(cpu: CPU) -> None:
+    cpu.bus.write(cpu.registers.bc, cpu.registers.a)
+
+
+def _ld_de_a(cpu: CPU) -> None:
+    cpu.bus.write(cpu.registers.de, cpu.registers.a)
+
+
+def _ld_a_bc(cpu: CPU) -> None:
+    cpu.registers.a = cpu.bus.read(cpu.registers.bc)
+
+
+def _ld_a_de(cpu: CPU) -> None:
+    cpu.registers.a = cpu.bus.read(cpu.registers.de)
+
+
 OPCODES: Final[dict[int, Instruction]] = {
     # Address         OPCODE     CYCLES
     0x00: Instruction("NOP", 4, _nop),
     0xC3: Instruction("JP a16", 16, _jp_a16),
+    0x02: Instruction("LD (BC), A", 8, _ld_bc_a),
+    0x12: Instruction("LD (DE), A", 8, _ld_de_a),
+    0x0A: Instruction("LD A, (BC)", 8, _ld_a_bc),
+    0x1A: Instruction("LD A, (DE)", 8, _ld_a_de),
     **_ld_immediate_block(),
     **_load_block(),
 }

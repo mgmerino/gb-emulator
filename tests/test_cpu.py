@@ -22,25 +22,6 @@ REGISTER_OPERANDS = [
     Operand.A,
 ]
 
-# Decoded from the bit pattern, the same way the generator.
-LOAD_BLOCK = [
-    (opcode, Operand((opcode >> 3) & 0b111), Operand(opcode & 0b111))
-    for opcode in range(0x40, 0x80)
-    if opcode != 0x76  # HALT
-]
-
-# The eight `00 rrr 110` opcodes and the register it targets.
-LD_IMMEDIATE: list[tuple[int, Operand]] = [
-    (0x06, Operand.B),  # LD B, d8
-    (0x0E, Operand.C),  # LD C, d8
-    (0x16, Operand.D),  # LD D, d8
-    (0x1E, Operand.E),  # LD E, d8
-    (0x26, Operand.H),  # LD H, d8
-    (0x2E, Operand.L),  # LD L, d8
-    (0x36, Operand.HL_POINTER),  # LD (HL), d8
-    (0x3E, Operand.A),  # LD A, d8
-]
-
 
 def test_pair_composes_from_its_halves(registers: Registers) -> None:
     registers.b = 0x23
@@ -419,6 +400,26 @@ def test_count_cycles_charges_four_per_access() -> None:
     assert count_cycles(immediates=1) - count_cycles() == 4
 
 
+# Decoded from the bit pattern, the same way the generator.
+LOAD_BLOCK = [
+    (opcode, Operand((opcode >> 3) & 0b111), Operand(opcode & 0b111))
+    for opcode in range(0x40, 0x80)
+    if opcode != 0x76  # HALT
+]
+
+# The eight `00 rrr 110` opcodes and the register it targets.
+LD_IMMEDIATE: list[tuple[int, Operand]] = [
+    (0x06, Operand.B),  # LD B, d8
+    (0x0E, Operand.C),  # LD C, d8
+    (0x16, Operand.D),  # LD D, d8
+    (0x1E, Operand.E),  # LD E, d8
+    (0x26, Operand.H),  # LD H, d8
+    (0x2E, Operand.L),  # LD L, d8
+    (0x36, Operand.HL_POINTER),  # LD (HL), d8
+    (0x3E, Operand.A),  # LD A, d8
+]
+
+
 @pytest.mark.parametrize(
     "opcode, dst, src",
     LOAD_BLOCK,
@@ -510,3 +511,99 @@ def test_ld_immediate_block_is_present_and_named() -> None:
     assert OPCODES[0x2E].name == "LD L, d8"
     assert OPCODES[0x36].name == "LD (HL), d8"
     assert OPCODES[0x3E].name == "LD A, d8"
+
+
+@pytest.mark.parametrize("opcode, pair", [(0x02, "bc"), (0x12, "de")])
+def test_pair_store_writes_a_to_the_address_in_the_pair(
+    cpu_running: CpuRunning, opcode: int, pair: str
+) -> None:
+    cpu = cpu_running(opcode)
+    setattr(cpu.registers, pair, 0xC000)  # cpu.registers.bc = 0xC000
+    cpu.registers.a = 0xC5
+
+    cycles = cpu.step()
+
+    assert cpu.bus.read(0xC000) == 0xC5
+    assert cycles == 8
+    assert cpu.registers.a == 0xC5  # remains unchanged
+    assert cpu.registers.pc == 0x0101
+    assert cpu.registers.f == 0x00
+
+
+@pytest.mark.parametrize("opcode, pair", [(0x0A, "bc"), (0x1A, "de")])
+def test_pair_load_reads_into_a_from_the_address_in_the_pair(
+    cpu_running: CpuRunning, opcode: int, pair: str
+) -> None:
+    cpu = cpu_running(opcode)
+    cpu.bus.write(0xC0AB, 0xF2)  # wire the value that will be loaded
+    cpu.registers.a = 0xFF  # sanity check
+    setattr(cpu.registers, pair, 0xC0AB)  # cpu.registers.[bc|de] = 0xC0AB
+
+    cycles = cpu.step()
+
+    assert cpu.registers.a == 0xF2
+    assert cycles == 8
+    assert cpu.bus.read(0xC0AB) == 0xF2  # remains unchanged
+    assert cpu.registers.pc == 0x0101
+    assert cpu.registers.f == 0x00
+
+
+@pytest.mark.parametrize(
+    "opcode, pair", [(0x02, "bc"), (0x12, "de"), (0x0A, "bc"), (0x1A, "de")]
+)
+def test_pair_indirect_leaves_the_pointer_alone(
+    cpu_running: CpuRunning, opcode: int, pair: str
+) -> None:
+    cpu = cpu_running(opcode)
+    setattr(cpu.registers, pair, 0xC0AB)
+
+    cpu.step()
+
+    assert getattr(cpu.registers, pair) == 0xC0AB
+
+
+PAIR_ADDRESSES = {"bc": 0xC000, "de": 0xD000}
+PAIR_BYTES = {"bc": 0xB0, "de": 0xDE}
+
+
+@pytest.mark.parametrize(
+    "opcode, pair, other", [(0x02, "bc", "de"), (0x12, "de", "bc")]
+)
+def test_a_store_writes_only_through_the_pair_its_mnemonic_names(
+    cpu_running: CpuRunning, opcode: int, pair: str, other: str
+) -> None:
+    cpu = cpu_running(opcode)
+    cpu.registers.bc = PAIR_ADDRESSES["bc"]
+    cpu.registers.de = PAIR_ADDRESSES["de"]
+    cpu.registers.a = 0x5A
+
+    cpu.step()
+
+    assert cpu.bus.read(PAIR_ADDRESSES[pair]) == 0x5A
+    assert cpu.bus.read(PAIR_ADDRESSES[other]) == 0x00
+
+
+@pytest.mark.parametrize(
+    "opcode, pair, other", [(0x0A, "bc", "de"), (0x1A, "de", "bc")]
+)
+def test_a_load_reads_only_through_the_pair_its_mnemonic_names(
+    cpu_running: CpuRunning, opcode: int, pair: str, other: str
+) -> None:
+    cpu = cpu_running(opcode)
+    cpu.registers.bc = PAIR_ADDRESSES["bc"]
+    cpu.registers.de = PAIR_ADDRESSES["de"]
+    cpu.bus.write(PAIR_ADDRESSES["bc"], PAIR_BYTES["bc"])
+    cpu.bus.write(PAIR_ADDRESSES["de"], PAIR_BYTES["de"])
+    cpu.registers.a = 0xFF
+
+    cpu.step()
+
+    assert cpu.registers.a == PAIR_BYTES[pair]
+    assert cpu.registers.a != PAIR_BYTES[other]
+
+
+def test_pair_indirect_block_is_present_and_named() -> None:
+    assert OPCODES[0x02].name == "LD (BC), A"
+    assert OPCODES[0x12].name == "LD (DE), A"
+    assert OPCODES[0x0A].name == "LD A, (BC)"
+    assert OPCODES[0x1A].name == "LD A, (DE)"
