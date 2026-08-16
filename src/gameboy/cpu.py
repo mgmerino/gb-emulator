@@ -443,6 +443,16 @@ def _ld_a_c(cpu: CPU) -> None:
     cpu.registers.a = cpu.bus.read(address)
 
 
+# ALU Operations
+# 0x80 (ADD A, B)
+# Manual implementation
+def _add_a_b(cpu: CPU) -> None:
+    value = read_operand(cpu, Operand.B)
+    result, flags = add(cpu.registers.a, value)
+    cpu.registers.apply(flags)
+    cpu.registers.a = result
+
+
 OPCODES: Final[dict[int, Instruction]] = {
     # Address         OPCODE     CYCLES
     0x00: Instruction("NOP", 4, _nop),
@@ -465,6 +475,7 @@ OPCODES: Final[dict[int, Instruction]] = {
     0xF0: Instruction("LDH A, (a8)", 12, _ldh_a_a8),
     0xE2: Instruction("LD (C), A", 8, _ld_c_a),
     0xF2: Instruction("LD A, (C)", 8, _ld_a_c),
+    0x80: Instruction("ADD A, B", 4, _add_a_b),
     **_ld_immediate_block(),
     **_load_block(),
 }

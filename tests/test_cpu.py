@@ -880,3 +880,51 @@ def test_ff00_page_block_is_present_and_named() -> None:
     assert OPCODES[0xF0].name == "LDH A, (a8)"
     assert OPCODES[0xE2].name == "LD (C), A"
     assert OPCODES[0xF2].name == "LD A, (C)"
+
+
+def test_add_a_b(cpu_running: CpuRunning) -> None:
+    cpu = cpu_running(0x80)
+    cpu.registers.a = 0x01
+    cpu.registers.b = 0x01
+    cpu.registers.c_flag = True
+
+    cycles = cpu.step()
+
+    assert cycles == 4
+    assert cpu.registers.a == 0x02
+    assert not cpu.registers.z_flag
+    assert not cpu.registers.n_flag
+    assert not cpu.registers.h_flag
+    assert not cpu.registers.c_flag
+
+
+def test_add_a_b_half_carry(cpu_running: CpuRunning) -> None:
+    cpu = cpu_running(0x80)
+    cpu.registers.a = 0x0F
+    cpu.registers.b = 0x01
+    cpu.registers.h_flag = False
+
+    cycles = cpu.step()
+
+    assert cycles == 4
+    assert cpu.registers.a == 0x10
+    assert not cpu.registers.z_flag
+    assert not cpu.registers.n_flag
+    assert cpu.registers.h_flag
+    assert not cpu.registers.c_flag
+
+
+def test_add_a_b_wraps_to_zero_with_carry(cpu_running: CpuRunning) -> None:
+    cpu = cpu_running(0x80)
+    cpu.registers.a = 0xFF
+    cpu.registers.b = 0x01
+    cpu.registers.c_flag = False
+
+    cycles = cpu.step()
+
+    assert cycles == 4
+    assert cpu.registers.a == 0x00
+    assert cpu.registers.z_flag
+    assert not cpu.registers.n_flag
+    assert cpu.registers.h_flag
+    assert cpu.registers.c_flag
