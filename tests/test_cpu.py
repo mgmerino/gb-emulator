@@ -400,6 +400,10 @@ def test_count_cycles_charges_four_per_access() -> None:
     assert count_cycles(immediates=1) - count_cycles() == 4
 
 
+#
+#  --- LOAD BLOCK ---
+#
+
 # Decoded from the bit pattern, the same way the generator.
 LOAD_BLOCK = [
     (opcode, Operand((opcode >> 3) & 0b111), Operand(opcode & 0b111))
