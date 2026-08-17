@@ -1,6 +1,6 @@
 from dataclasses import dataclass
 
-from gameboy.bits import u8
+from gameboy.bits import u8, u16
 
 
 @dataclass(frozen=True, slots=True)
@@ -122,4 +122,18 @@ def dec(value: int) -> tuple[int, Flags]:
         n=True,
         h=(value & 0x0F) == 0x0,  # low nibble was 0x0
     )
+    return result, flags
+
+
+def add16(a: int, b: int) -> tuple[int, Flags]:
+    total = a + b
+    result = u16(total)
+
+    flags = Flags(
+        z=None,
+        n=False,
+        h=(a & 0x0FFF) + (b & 0x0FFF) > 0x0FFF,
+        c=total > 0xFFFF,
+    )
+
     return result, flags
