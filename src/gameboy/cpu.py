@@ -317,7 +317,7 @@ def _make_ld_immediate(dst: Operand) -> Callable[[CPU], None]:
     return execute
 
 
-def _load_block() -> dict[int, Instruction]:
+def _ld_block() -> dict[int, Instruction]:
     instructions: dict[int, Instruction] = {}
 
     for opcode in range(0x40, 0x80):
@@ -516,7 +516,7 @@ OPCODES: Final[dict[int, Instruction]] = {
     0xF0: Instruction("LDH A, (a8)", 12, _ldh_a_a8),
     0xE2: Instruction("LD (C), A", 8, _ld_c_a),
     0xF2: Instruction("LD A, (C)", 8, _ld_a_c),
+    **_ld_block(),
     **_ld_immediate_block(),
-    **_load_block(),
     **_alu_block(),
 }
