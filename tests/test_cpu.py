@@ -1112,3 +1112,119 @@ def test_alu_immediate_block_names_read_as_assembly() -> None:
     assert OPCODES[0xEE].name == "XOR A, d8"
     assert OPCODES[0xF6].name == "OR A, d8"
     assert OPCODES[0xFE].name == "CP A, d8"
+
+
+#
+# --- INC / DEC r ---
+#
+
+
+def test_inc_dec_block_covers_every_opcode() -> None:
+    inc_block = set(range(0x04, 0x40, 8))
+    dec_block = set(range(0x05, 0x40, 8))
+
+    assert OPCODES.keys() & inc_block == inc_block
+    assert OPCODES.keys() & dec_block == dec_block
+
+
+def test_inc_dec_block_names_read_as_assembly() -> None:
+    assert OPCODES[0x04].name == "INC B"
+    assert OPCODES[0x05].name == "DEC B"
+    assert OPCODES[0x14].name == "INC D"
+    assert OPCODES[0x15].name == "DEC D"
+
+
+# Every opcode in the block, with the operation and the operand it decodes to.
+INC_DEC_BLOCK: list[tuple[int, str, Operand]] = [
+    (opcode, name, Operand((opcode >> 3) & 0b111))
+    for name, base in (("INC", 0x04), ("DEC", 0x05))
+    for opcode in range(base, 0x40, 8)
+]
+
+INC_DEC_BOUNDARIES: list[tuple[int, int, int, int]] = [
+    # opcode, starting value, result, resulting F
+    (0x04, 0x00, 0x01, 0x00),  # INC, nothing interesting
+    (0x04, 0x0F, 0x10, 0x20),  # INC, low nibble overflowed -> H
+    (0x04, 0xFF, 0x00, 0xA0),  # INC, wrapped -> Z and H
+    (0x05, 0x01, 0x00, 0xC0),  # DEC, landed on zero -> Z and N
+    (0x05, 0x10, 0x0F, 0x60),  # DEC, low nibble borrowed -> N and H
+    (0x05, 0x00, 0xFF, 0x60),  # DEC, wrapped -> N and H
+]
+
+
+@pytest.mark.parametrize(
+    "opcode, name, operand",
+    INC_DEC_BLOCK,
+    ids=[f"{name} {operand.assembly_name}" for _, name, operand in INC_DEC_BLOCK],
+)
+def test_inc_dec_cycle_costs_follow_the_access_rule(
+    cpu_running: CpuRunning, opcode: int, name: str, operand: Operand
+) -> None:
+    cpu = cpu_running(opcode)
+
+    assert cpu.step() == (12 if operand is Operand.HL_POINTER else 4)
+    assert OPCODES[opcode].name == f"{name} {operand.assembly_name}"
+
+
+@pytest.mark.parametrize(
+    "opcode, start, expected, expected_f",
+    INC_DEC_BOUNDARIES,
+    ids=[f"{op:#04x}-{start:#04x}" for op, start, _, _ in INC_DEC_BOUNDARIES],
+)
+def test_inc_and_dec_flag_boundaries(
+    cpu_running: CpuRunning, opcode: int, start: int, expected: int, expected_f: int
+) -> None:
+    cpu = cpu_running(opcode)
+    cpu.registers.b = start
+
+    cpu.step()
+
+    assert cpu.registers.b == expected
+    assert cpu.registers.f == expected_f
+
+
+@pytest.mark.parametrize(
+    "opcode, start, carry_in, expected_f",
+    [
+        (0x04, 0x0F, True, 0x30),  # INC: H set by the nibble, C carried in
+        (0x04, 0x0F, False, 0x20),  # ... and still clear when it started clear
+        (0x05, 0x10, True, 0x70),  # DEC: N and H, C carried in
+        (0x05, 0x10, False, 0x60),
+    ],
+    ids=["INC-carry-set", "INC-carry-clear", "DEC-carry-set", "DEC-carry-clear"],
+)
+def test_inc_and_dec_leave_the_carry_flag_alone(
+    cpu_running: CpuRunning, opcode: int, start: int, carry_in: bool, expected_f: int
+) -> None:
+    # Checks the `None` branch of Registers.apply: alu.inc and alu.dec never
+    # name `c`, so it defaults to None and apply() skips it.
+
+    cpu = cpu_running(opcode)
+    cpu.registers.b = start
+    cpu.registers.c_flag = carry_in
+
+    cpu.step()
+
+    assert cpu.registers.c_flag is carry_in
+    assert cpu.registers.f == expected_f
+
+
+@pytest.mark.parametrize(
+    "opcode, start, expected",
+    [(0x34, 0x41, 0x42), (0x35, 0x41, 0x40)],
+    ids=["INC (HL)", "DEC (HL)"],
+)
+def test_inc_dec_hl_read_and_write_through_the_bus(
+    cpu_running: CpuRunning, opcode: int, start: int, expected: int
+) -> None:
+    address = 0xC000
+    cpu = cpu_running(opcode)
+    cpu.registers.hl = address
+    cpu.bus.write(address, start)
+
+    cycles = cpu.step()
+
+    assert cpu.bus.read(address) == expected
+    # INC (HL) is not INC HL:
+    assert cpu.registers.hl == address
+    assert cycles == 12

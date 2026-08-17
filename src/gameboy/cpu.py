@@ -15,7 +15,7 @@ from dataclasses import dataclass
 from enum import IntEnum
 from typing import Final, Self
 
-from gameboy.alu import Flags, adc, add, and_, or_, sbc, sub, xor
+from gameboy.alu import Flags, adc, add, and_, dec, inc, or_, sbc, sub, xor
 from gameboy.bits import get_bit, high_byte, join_bytes, low_byte, u16
 from gameboy.memory import MemoryDevice
 
@@ -520,6 +520,49 @@ def _alu_immediate_block() -> dict[int, Instruction]:
     return instructions
 
 
+# The encoding: 00 rrr 100 is INC r,
+#               00 rrr 101 is DEC r
+# INC:  0x04 0x0C 0x14 0x1C 0x24 0x2C 0x34 0x3C
+# DEC:  0x05 0x0D 0x15 0x1D 0x25 0x2D 0x35 0x3D
+#         B    C    D    E    H    L  (HL)   A
+def _make_inc_dec(
+    operand: Operand, operation: Callable[[int], tuple[int, Flags]]
+) -> Callable[[CPU], None]:
+    def execute(cpu: CPU) -> None:
+        current_value = read_operand(cpu, operand)
+        result, flags = operation(current_value)
+        cpu.registers.apply(flags)
+
+        write_operand(cpu, operand, result)
+
+    return execute
+
+
+def _inc_dec_block() -> dict[int, Instruction]:
+    instructions: dict[int, Instruction] = {}
+    # INC block
+    for opcode in range(0x04, 0x40, 8):
+        operand = Operand((opcode >> 3) & 0b111)  #  00 rrr 100
+
+        instructions[opcode] = Instruction(
+            f"INC {operand.assembly_name}",
+            count_cycles(operand, operand),  # twice, one for read, one for write
+            _make_inc_dec(operand, inc),
+        )
+
+    # DEC block
+    for opcode in range(0x05, 0x40, 8):
+        operand = Operand((opcode >> 3) & 0b111)  #  00 rrr 101
+
+        instructions[opcode] = Instruction(
+            f"DEC {operand.assembly_name}",
+            count_cycles(operand, operand),  # twice, one for read, one for write
+            _make_inc_dec(operand, dec),
+        )
+
+    return instructions
+
+
 OPCODES: Final[dict[int, Instruction]] = {
     # Address         OPCODE     CYCLES
     0x00: Instruction("NOP", 4, _nop),
@@ -546,4 +589,5 @@ OPCODES: Final[dict[int, Instruction]] = {
     **_ld_immediate_block(),
     **_alu_block(),
     **_alu_immediate_block(),
+    **_inc_dec_block(),
 }
