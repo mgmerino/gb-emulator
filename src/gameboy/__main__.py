@@ -18,9 +18,8 @@ type Row = tuple[int, int, str]
 BYTES_PER_ROW = 16
 # 16 groups of two hex digits, 15 separators, plus the extra space at the gutter.
 HEX_WIDTH = BYTES_PER_ROW * 3 - 1 + 1
-# Widest mnemonic in the table today is "JP a16". Bump it when a longer one
-# lands, or every row after it loses its columns.
-NAME_WIDTH = 9
+# Widest mnemonic in the table today is "ADD A, (HL)".
+NAME_WIDTH = 11
 
 
 def format_size(size: int) -> str:

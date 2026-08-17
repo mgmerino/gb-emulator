@@ -400,6 +400,10 @@ def test_count_cycles_charges_four_per_access() -> None:
     assert count_cycles(immediates=1) - count_cycles() == 4
 
 
+#
+#  --- LOAD BLOCK ---
+#
+
 # Decoded from the bit pattern, the same way the generator.
 LOAD_BLOCK = [
     (opcode, Operand((opcode >> 3) & 0b111), Operand(opcode & 0b111))
@@ -880,3 +884,231 @@ def test_ff00_page_block_is_present_and_named() -> None:
     assert OPCODES[0xF0].name == "LDH A, (a8)"
     assert OPCODES[0xE2].name == "LD (C), A"
     assert OPCODES[0xF2].name == "LD A, (C)"
+
+
+#
+# --- ALU BLOCK ---
+#
+
+# 10 ooo sss: the operation index in bits 5 to 3, the source in bits 2 to 0.
+# The destination is always A.
+ALU_BLOCK = [
+    (opcode, (opcode >> 3) & 0b111, Operand(opcode & 0b111))
+    for opcode in range(0x80, 0xC0)
+]
+
+# One row per operation index, all against source B, with the carry set. This
+# way ADC and SBC are distinguishable from ADD and SUB. Values are computed by
+# hand from the flag table.
+ALU_OPERATIONS: list[tuple[int, str, int, int]] = [
+    # opcode, name, resulting A, resulting F
+    (0x80, "ADD", 0x4B, 0x20),  # 0x3C + 0x0F,     nibble carry
+    (0x88, "ADC", 0x4C, 0x20),  # 0x3C + 0x0F + 1, nibble carry
+    (0x90, "SUB", 0x2D, 0x60),  # 0x3C - 0x0F,     nibble borrow
+    (0x98, "SBC", 0x2C, 0x60),  # 0x3C - 0x0F - 1, nibble borrow
+    (0xA0, "AND", 0x0C, 0x20),  # AND always sets H
+    (0xA8, "XOR", 0x33, 0x00),
+    (0xB0, "OR", 0x3F, 0x00),
+    (0xB8, "CP", 0x3C, 0x60),  # A unchanged, flags as SUB
+]
+
+# A distinct value per source, so the result maps which one was read. H and L
+# are seeded before (HL).
+ALU_SOURCE_SEEDS: list[tuple[Operand, int]] = [
+    (Operand.B, 0x01),
+    (Operand.C, 0x02),
+    (Operand.D, 0x03),
+    (Operand.E, 0x04),
+    (Operand.H, 0x05),
+    (Operand.L, 0x06),
+    (Operand.HL_POINTER, 0x07),
+    (Operand.A, 0x10),
+]
+
+
+def test_alu_block_covers_every_opcode() -> None:
+    block = set(range(0x80, 0xC0))
+
+    assert OPCODES.keys() & block == block
+
+
+@pytest.mark.parametrize(
+    "opcode, operation, src",
+    ALU_BLOCK,
+    ids=[f"{opcode:#04x}" for opcode, _, _ in ALU_BLOCK],
+)
+def test_alu_block_cycle_costs_follow_the_access_rule(
+    opcode: int, operation: int, src: Operand
+) -> None:
+    assert OPCODES[opcode].cycles == count_cycles(src)
+    assert OPCODES[opcode].cycles == (8 if src is Operand.HL_POINTER else 4)
+
+
+@pytest.mark.parametrize(
+    "opcode, name, expected_a, expected_f",
+    ALU_OPERATIONS,
+    ids=[name for _, name, _, _ in ALU_OPERATIONS],
+)
+def test_alu_applies_the_operation_its_opcode_names(
+    cpu_running: CpuRunning, opcode: int, name: str, expected_a: int, expected_f: int
+) -> None:
+    cpu = cpu_running(opcode)
+    cpu.registers.a = 0x3C
+    cpu.registers.b = 0x0F
+    cpu.registers.c_flag = True
+
+    cycles = cpu.step()
+
+    assert OPCODES[opcode].name == f"{name} A, B"
+    assert cpu.registers.a == expected_a
+    assert cpu.registers.f == expected_f
+    assert cycles == 4
+    assert cpu.registers.b == 0x0F  # source != destination
+    assert cpu.registers.pc == 0x0101
+
+
+@pytest.mark.parametrize(
+    "src, seed",
+    ALU_SOURCE_SEEDS,
+    ids=[src.name for src, _ in ALU_SOURCE_SEEDS],
+)
+def test_alu_reads_the_source_its_opcode_names(
+    cpu_running: CpuRunning, src: Operand, seed: int
+) -> None:
+    cpu = cpu_running(0x80 + src)  # ADD A, src
+    for operand, value in ALU_SOURCE_SEEDS:
+        write_operand(cpu, operand, value)
+
+    cpu.step()
+
+    assert cpu.registers.a == (0x20 if src is Operand.A else 0x10 + seed)
+
+
+def test_cp_sets_flags_without_touching_the_accumulator(
+    cpu_running: CpuRunning,
+) -> None:
+    cpu = cpu_running(0xB8)  # CP A, B
+    cpu.registers.a = 0x0F
+    cpu.registers.b = 0x01
+
+    cpu.step()
+
+    assert cpu.registers.a == 0x0F
+    assert cpu.registers.f == 0x40  # N alone: no borrow at boundaries
+
+
+def test_cp_reports_equality_through_the_zero_flag(cpu_running: CpuRunning) -> None:
+    cpu = cpu_running(0xB8)  # CP A, B
+    cpu.registers.a = 0x42
+    cpu.registers.b = 0x42
+
+    cpu.step()
+
+    assert cpu.registers.a == 0x42
+    assert cpu.registers.f == 0xC0  # Z and N
+
+
+@pytest.mark.parametrize(
+    "opcode, without_carry, with_carry",
+    [
+        (0x88, 0x4B, 0x4C),  # ADC A, B
+        (0x98, 0x2D, 0x2C),  # SBC A, B
+    ],
+    ids=["ADC", "SBC"],
+)
+def test_adc_and_sbc_read_the_carry_flag(
+    cpu_running: CpuRunning, opcode: int, without_carry: int, with_carry: int
+) -> None:
+    # The carry has to reach the ALU from the register file.
+    for carry, expected in ((False, without_carry), (True, with_carry)):
+        cpu = cpu_running(opcode)
+        cpu.registers.a = 0x3C
+        cpu.registers.b = 0x0F
+        cpu.registers.c_flag = carry
+
+        cpu.step()
+
+        assert cpu.registers.a == expected
+
+
+def test_alu_block_names_read_as_assembly() -> None:
+    assert OPCODES[0x80].name == "ADD A, B"
+    assert OPCODES[0x86].name == "ADD A, (HL)"
+    assert OPCODES[0x90].name == "SUB A, B"
+    assert OPCODES[0xA8].name == "XOR A, B"
+    assert OPCODES[0xB0].name == "OR A, B"
+    assert OPCODES[0xBF].name == "CP A, A"
+
+
+# The immediate ALU block, 0xC6 to 0xFE on the `11 ooo 110` pattern.
+# ALU_OPERATIONS is reused and translated to the immediate opcode, following
+# this pattern:
+# register, source B:  10 ooo 000
+# immediate:           11 ooo 110
+#                       ^      ^
+#                       |      +-- source field: 000 -> 110   = +0x06
+#                       +--------- block bit:     10 ->  11   = +0x40
+
+
+@pytest.mark.parametrize(
+    "opcode, name, expected_a, expected_f",
+    ALU_OPERATIONS,
+    ids=[name for _, name, _, _ in ALU_OPERATIONS],
+)
+def test_alu_immediate_applies_the_operation_its_opcode_names(
+    cpu_running: CpuRunning, opcode: int, name: str, expected_a: int, expected_f: int
+) -> None:
+    imm_opcode = opcode + 0x46  # see chart above
+    value = 0x0F
+    cpu = cpu_running(imm_opcode, value)
+
+    cpu.registers.a = 0x3C
+    cpu.registers.c_flag = True
+
+    cycles = cpu.step()
+
+    assert OPCODES[imm_opcode].name == f"{name} A, d8"
+    assert cpu.registers.a == expected_a
+    assert cpu.registers.f == expected_f
+    assert cycles == 8
+    assert cpu.registers.pc == 0x0102
+
+
+def test_the_byte_after_an_alu_immediate_is_the_next_opcode(
+    cpu_running: CpuRunning,
+) -> None:
+    cpu = cpu_running(0xC6, 0x01, 0xC6, 0x02)
+
+    write_operand(cpu, Operand.A, 0xF0)  # seed value
+
+    cpu.step()
+
+    assert read_operand(cpu, Operand.A) == 0xF1
+
+    cpu.step()
+
+    assert read_operand(cpu, Operand.A) == 0xF3
+    assert cpu.registers.pc == 0x0104
+
+
+def test_cp_immediate_leaves_the_accumulator_alone(cpu_running: CpuRunning) -> None:
+    cpu = cpu_running(0xFE, 0x01)
+    write_operand(cpu, Operand.A, 0xF0)  # seed value
+
+    cpu.step()
+
+    assert read_operand(cpu, Operand.A) == 0xF0
+    # Flags still have to move, or a CP that did nothing at all would pass:
+    # N and H, borrowing out of the low nibble but not out of the byte.
+    assert cpu.registers.f == 0x60
+
+
+def test_alu_immediate_block_names_read_as_assembly() -> None:
+    assert OPCODES[0xC6].name == "ADD A, d8"
+    assert OPCODES[0xCE].name == "ADC A, d8"
+    assert OPCODES[0xD6].name == "SUB A, d8"
+    assert OPCODES[0xDE].name == "SBC A, d8"
+    assert OPCODES[0xE6].name == "AND A, d8"
+    assert OPCODES[0xEE].name == "XOR A, d8"
+    assert OPCODES[0xF6].name == "OR A, d8"
+    assert OPCODES[0xFE].name == "CP A, d8"

@@ -1,4 +1,3 @@
-from collections.abc import Callable
 from dataclasses import dataclass
 
 from gameboy.bits import u8
@@ -124,10 +123,3 @@ def dec(value: int) -> tuple[int, Flags]:
         h=(value & 0x0F) == 0x0,  # low nibble was 0x0
     )
     return result, flags
-
-
-@dataclass(frozen=True, slots=True)
-class AluOperation:
-    name: str
-    apply: Callable[[int, int, bool], tuple[int, Flags]]
-    writes_result: bool
