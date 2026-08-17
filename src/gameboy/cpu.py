@@ -468,14 +468,24 @@ _ALU_OPERATIONS: Final[tuple[AluOperation, ...]] = (
 )
 
 
+def _apply_alu(cpu: CPU, operation: AluOperation, value: int) -> None:
+    result, flags = operation.apply(cpu.registers.a, value, cpu.registers.c_flag)
+    cpu.registers.apply(flags)
+
+    if operation.writes_result:
+        cpu.registers.a = result
+
+
 def _make_alu(operation: AluOperation, src: Operand) -> Callable[[CPU], None]:
     def execute(cpu: CPU) -> None:
-        value = read_operand(cpu, src)
-        result, flags = operation.apply(cpu.registers.a, value, cpu.registers.c_flag)
-        cpu.registers.apply(flags)
+        _apply_alu(cpu, operation=operation, value=read_operand(cpu, src))
 
-        if operation.writes_result:
-            cpu.registers.a = result
+    return execute
+
+
+def _make_alu_immediate(operation: AluOperation) -> Callable[[CPU], None]:
+    def execute(cpu: CPU) -> None:
+        _apply_alu(cpu, operation=operation, value=cpu.fetch_u8())
 
     return execute
 
@@ -490,6 +500,22 @@ def _alu_block() -> dict[int, Instruction]:
             f"{operation.name} A, {src.assembly_name}",
             count_cycles(src),
             _make_alu(operation, src),
+        )
+    return instructions
+
+
+def _alu_immediate_block() -> dict[int, Instruction]:
+    instructions: dict[int, Instruction] = {}
+    # Opcodes:   [0xC6, 0xCE, 0xD6, 0xDE, 0xE6, 0xEE, 0xF6, 0xFE]
+    # Operation:  ADD   ADC   SUB   SBC   AND   XOR   OR    CP
+
+    for opcode in range(0xC6, 0xFF, 8):  # 11 ooo 110
+        operation = _ALU_OPERATIONS[(opcode >> 3) & 0b111]
+
+        instructions[opcode] = Instruction(
+            f"{operation.name} A, d8",
+            count_cycles(immediates=1),
+            _make_alu_immediate(operation),
         )
     return instructions
 
@@ -519,4 +545,5 @@ OPCODES: Final[dict[int, Instruction]] = {
     **_ld_block(),
     **_ld_immediate_block(),
     **_alu_block(),
+    **_alu_immediate_block(),
 }
