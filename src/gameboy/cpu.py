@@ -15,7 +15,7 @@ from dataclasses import dataclass
 from enum import IntEnum
 from typing import Final, Self
 
-from gameboy.alu import Flags
+from gameboy.alu import Flags, adc, add, and_, or_, sbc, sub, xor
 from gameboy.bits import get_bit, high_byte, join_bytes, low_byte, u16
 from gameboy.memory import MemoryDevice
 
@@ -164,6 +164,13 @@ class Instruction:
     name: str
     cycles: int
     execute: Callable[["CPU"], None]
+
+
+@dataclass(frozen=True, slots=True)
+class AluOperation:
+    name: str
+    apply: Callable[[int, int, bool], tuple[int, Flags]]
+    writes_result: bool
 
 
 @dataclass
@@ -443,14 +450,48 @@ def _ld_a_c(cpu: CPU) -> None:
     cpu.registers.a = cpu.bus.read(address)
 
 
-# ALU Operations
-# 0x80 (ADD A, B)
-# Manual implementation
-def _add_a_b(cpu: CPU) -> None:
-    value = read_operand(cpu, Operand.B)
-    result, flags = add(cpu.registers.a, value)
-    cpu.registers.apply(flags)
-    cpu.registers.a = result
+# ----------
+# ALU Block
+# ----------
+# The ALU block, 0x80 to 0xBF. The bits read 10 ooo sss: operation in bits 5 to
+# 3, source in bits 2 to 0. The destination is always A, which is why it is
+# called the accumulator.
+_ALU_OPERATIONS: Final[tuple[AluOperation, ...]] = (
+    AluOperation("ADD", lambda a, b, _carry: add(a, b), writes_result=True),
+    AluOperation("ADC", adc, writes_result=True),
+    AluOperation("SUB", lambda a, b, _carry: sub(a, b), writes_result=True),
+    AluOperation("SBC", sbc, writes_result=True),
+    AluOperation("AND", lambda a, b, _carry: and_(a, b), writes_result=True),
+    AluOperation("XOR", lambda a, b, _carry: xor(a, b), writes_result=True),
+    AluOperation("OR", lambda a, b, _carry: or_(a, b), writes_result=True),
+    AluOperation("CP", lambda a, b, _carry: sub(a, b), writes_result=False),
+)
+
+
+def _make_alu(operation: AluOperation, src: Operand) -> Callable[[CPU], None]:
+    def execute(cpu: CPU) -> None:
+        value = read_operand(cpu, src)
+        result, flags = operation.apply(cpu.registers.a, value, cpu.registers.c_flag)
+        cpu.registers.apply(flags)
+
+        if operation.writes_result:
+            cpu.registers.a = result
+
+    return execute
+
+
+def _alu_block() -> dict[int, Instruction]:
+    instructions: dict[int, Instruction] = {}
+    for opcode in range(0x80, 0xC0):  # 10 ooo sss
+        operation = _ALU_OPERATIONS[(opcode >> 3) & 0b111]
+        src = Operand(opcode & 0b111)
+
+        instructions[opcode] = Instruction(
+            f"{operation.name} A, {src.assembly_name}",
+            count_cycles(src),
+            _make_alu(operation, src),
+        )
+    return instructions
 
 
 OPCODES: Final[dict[int, Instruction]] = {
@@ -475,7 +516,7 @@ OPCODES: Final[dict[int, Instruction]] = {
     0xF0: Instruction("LDH A, (a8)", 12, _ldh_a_a8),
     0xE2: Instruction("LD (C), A", 8, _ld_c_a),
     0xF2: Instruction("LD A, (C)", 8, _ld_a_c),
-    0x80: Instruction("ADD A, B", 4, _add_a_b),
     **_ld_immediate_block(),
     **_load_block(),
+    **_alu_block(),
 }
