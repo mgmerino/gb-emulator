@@ -5,11 +5,14 @@ from gameboy.alu import Flags
 from gameboy.cpu import (
     OPCODES,
     Operand,
+    RegisterPair,
     Registers,
     UnknownOpcodeError,
     count_cycles,
     read_operand,
+    read_pair,
     write_operand,
+    write_pair,
 )
 
 REGISTER_OPERANDS = [
@@ -1228,3 +1231,156 @@ def test_inc_dec_hl_read_and_write_through_the_bus(
     # INC (HL) is not INC HL:
     assert cpu.registers.hl == address
     assert cycles == 12
+
+
+# --- 16-BIT LOADS AND ARITHMETIC ---
+#
+
+PAIRS: list[tuple[int, RegisterPair]] = [
+    (0x00, RegisterPair.BC),
+    # (0x10, RegisterPair.DE),
+    # (0x20, RegisterPair.HL),
+    # (0x30, RegisterPair.SP),
+]
+
+# base opcode, mnemonic template, cycles
+PAIR_FAMILIES: list[tuple[int, str, int]] = [
+    (0x01, "LD {}, d16", 12),
+    (0x03, "INC {}", 8),
+    (0x0B, "DEC {}", 8),
+    (0x09, "ADD HL, {}", 8),
+]
+
+
+@pytest.mark.parametrize("offset, pair", PAIRS, ids=[p.name for _, p in PAIRS])
+def test_pair_accessors_round_trip(
+    cpu_running: CpuRunning, offset: int, pair: RegisterPair
+) -> None:
+    cpu = cpu_running(0x00)
+    write_pair(cpu, pair, 0xBEEF)
+
+    assert read_pair(cpu, pair) == 0xBEEF
+    assert getattr(cpu.registers, pair.name.lower()) == 0xBEEF
+
+
+@pytest.mark.parametrize(
+    "base, template, cycles",
+    PAIR_FAMILIES,
+    ids=[template.format("rr") for _, template, _ in PAIR_FAMILIES],
+)
+def test_pair_family_covers_its_four_opcodes(
+    base: int, template: str, cycles: int
+) -> None:
+    # Per family, not one set of sixteen: the failure mode these loops invite is
+    # one family overwriting another, and a combined set would not see it.
+    family = {base + offset for offset, _ in PAIRS}
+
+    assert OPCODES.keys() & family == family
+
+
+@pytest.mark.parametrize(
+    "base, template, cycles",
+    PAIR_FAMILIES,
+    ids=[template.format("rr") for _, template, _ in PAIR_FAMILIES],
+)
+def test_pair_family_names_and_cycles(base: int, template: str, cycles: int) -> None:
+    for offset, pair in PAIRS:
+        instruction = OPCODES[base + offset]
+
+        assert instruction.name == template.format(pair.name)
+        assert instruction.cycles == cycles
+
+
+@pytest.mark.parametrize(
+    "opcode, pair",
+    [(0x01 + offset, pair) for offset, pair in PAIRS],
+    ids=[pair.name for _, pair in PAIRS],
+)
+def test_ld_pair_immediate_is_little_endian(
+    cpu_running: CpuRunning, opcode: int, pair: RegisterPair
+) -> None:
+    cpu = cpu_running(opcode, 0x34, 0x12)
+
+    cycles = cpu.step()
+
+    assert read_pair(cpu, pair) == 0x1234
+    assert cycles == 12
+    assert cpu.registers.pc == 0x0103  # opcode plus two immediate bytes
+    assert cpu.registers.f == 0x00  # no flags touched
+
+
+@pytest.mark.parametrize(
+    "opcode, pair, start, expected",
+    # Mid-range first. The wrap cases alone cannot tell a 16-bit increment from
+    # an 8-bit one, because 0xFFFF + 1 and 0x00 + 1 both land on zero.
+    [(0x03 + offset, pair, 0x1234, 0x1235) for offset, pair in PAIRS]
+    + [(0x03 + offset, pair, 0xFFFF, 0x0000) for offset, pair in PAIRS]
+    + [(0x0B + offset, pair, 0x1234, 0x1233) for offset, pair in PAIRS]
+    + [(0x0B + offset, pair, 0x0000, 0xFFFF) for offset, pair in PAIRS],
+    ids=[f"INC {p.name} mid" for _, p in PAIRS]
+    + [f"INC {p.name} wrap" for _, p in PAIRS]
+    + [f"DEC {p.name} mid" for _, p in PAIRS]
+    + [f"DEC {p.name} wrap" for _, p in PAIRS],
+)
+def test_inc_dec_pair_wrap_and_touch_no_flags(
+    cpu_running: CpuRunning,
+    opcode: int,
+    pair: RegisterPair,
+    start: int,
+    expected: int,
+) -> None:
+    # Unlike INC r, these write no flags
+    cpu = cpu_running(opcode)
+    write_pair(cpu, pair, start)
+    cpu.registers.f = 0xF0
+
+    cycles = cpu.step()
+
+    assert read_pair(cpu, pair) == expected
+    assert cpu.registers.f == 0xF0
+    assert cycles == 8
+
+
+@pytest.mark.parametrize(
+    "opcode, pair, hl, operand, expected, expected_f",
+    [
+        # 0xA23 + 0x605 = 0x1028, so the carry crosses bit 11 but not bit 15.
+        # Z starts and ends set
+        (0x09, RegisterPair.BC, 0x8A23, 0x0605, 0x9028, 0xA0),
+        # Exactly the bit-11 boundary, Z starts clear
+        (0x19, RegisterPair.DE, 0x0FFF, 0x0001, 0x1000, 0x20),
+        # Carry out of bit 15 with no half-carry
+        (0x39, RegisterPair.SP, 0x8000, 0x8000, 0x0000, 0x10),
+    ],
+    ids=["ADD HL, BC", "ADD HL, DE", "ADD HL, SP"],
+)
+def test_add_hl_writes_its_flags_and_keeps_zero(
+    cpu_running: CpuRunning,
+    opcode: int,
+    pair: RegisterPair,
+    hl: int,
+    operand: int,
+    expected: int,
+    expected_f: int,
+) -> None:
+    cpu = cpu_running(opcode)
+    cpu.registers.hl = hl
+    write_pair(cpu, pair, operand)
+    cpu.registers.z_flag = bool(expected_f & 0x80)
+
+    cycles = cpu.step()
+
+    assert cpu.registers.hl == expected
+    assert cpu.registers.f == expected_f
+    assert cycles == 8
+
+
+def test_add_hl_hl_doubles_the_pointer(cpu_running: CpuRunning) -> None:
+    # 0x29 is ADD HL, HL: the pair can be HL itself, so the same register is
+    # both operands and the destination.
+    cpu = cpu_running(0x29)
+    cpu.registers.hl = 0x1234
+
+    cpu.step()
+
+    assert cpu.registers.hl == 0x2468

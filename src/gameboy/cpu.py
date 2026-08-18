@@ -15,7 +15,7 @@ from dataclasses import dataclass
 from enum import IntEnum
 from typing import Final, Self
 
-from gameboy.alu import Flags, adc, add, and_, dec, inc, or_, sbc, sub, xor
+from gameboy.alu import Flags, adc, add, add16, and_, dec, inc, or_, sbc, sub, xor
 from gameboy.bits import get_bit, high_byte, join_bytes, low_byte, u16
 from gameboy.memory import MemoryDevice
 
@@ -265,6 +265,39 @@ def write_operand(cpu: CPU, operand: Operand, value: int) -> None:
             cpu.registers.h = value
         case Operand.L:
             cpu.registers.l = value
+
+
+class RegisterPair(IntEnum):
+    """The two-bit pair index in bits 5 and 4 of the 16-bit instructions."""
+
+    BC = 0b00
+    DE = 0b01
+    HL = 0b10
+    SP = 0b11
+
+
+def read_pair(cpu: CPU, pair: RegisterPair) -> int:
+    match pair:
+        case RegisterPair.BC:
+            return cpu.registers.bc
+        case RegisterPair.DE:
+            return cpu.registers.de
+        case RegisterPair.HL:
+            return cpu.registers.hl
+        case RegisterPair.SP:
+            return cpu.registers.sp
+
+
+def write_pair(cpu: CPU, pair: RegisterPair, value: int) -> None:
+    match pair:
+        case RegisterPair.BC:
+            cpu.registers.bc = value
+        case RegisterPair.DE:
+            cpu.registers.de = value
+        case RegisterPair.HL:
+            cpu.registers.hl = value
+        case RegisterPair.SP:
+            cpu.registers.sp = value
 
 
 T_CYCLES_PER_ACCESS = 4
@@ -563,6 +596,76 @@ def _inc_dec_block() -> dict[int, Instruction]:
     return instructions
 
 
+# ------------------------------
+# 16-bit loads and arithmetic
+# ------------------------------
+#
+# | Opcodes                | Instruction  | Cycles | Flags                     |
+# | ---------------------- | ------------ | ------ | ------------------------- |
+# | 0x01 0x11 0x21 0x31    | LD rr, d16   | 12     | none                      |
+# | 0x08                   | LD (a16), SP | 20     | none                      |
+# | 0x03 0x13 0x23 0x33    | INC rr       | 8      | none at all               |
+# | 0x0B 0x1B 0x2B 0x3B    | DEC rr       | 8      | none at all               |
+# | 0x09 0x19 0x29 0x39    | ADD HL, rr   | 8      | Z kept, N=0, H@11, C@15   |
+
+
+def _ld_bc_d16(cpu: CPU) -> None:
+    value = cpu.fetch_u16()
+    write_pair(cpu, RegisterPair.BC, value)
+
+
+def _ld_de_d16(cpu: CPU) -> None:
+    value = cpu.fetch_u16()
+    write_pair(cpu, RegisterPair.DE, value)
+
+
+def _inc_bc(cpu: CPU) -> None:
+    current_value = read_pair(cpu, RegisterPair.BC)
+    result = u16(current_value + 1)
+    write_pair(cpu, RegisterPair.BC, result)
+
+
+def _dec_bc(cpu: CPU) -> None:
+    current_value = read_pair(cpu, RegisterPair.BC)
+    result = u16(current_value - 1)
+    write_pair(cpu, RegisterPair.BC, result)
+
+
+def _add_hl_bc(cpu: CPU) -> None:
+    a = read_pair(cpu, RegisterPair.BC)
+    b = cpu.registers.hl
+    result, flags = add16(a, b)
+
+    cpu.registers.apply(flags)
+    write_pair(cpu, RegisterPair.HL, result)
+
+
+def _add_hl_de(cpu: CPU) -> None:
+    a = read_pair(cpu, RegisterPair.DE)
+    b = cpu.registers.hl
+    result, flags = add16(a, b)
+
+    cpu.registers.apply(flags)
+    write_pair(cpu, RegisterPair.HL, result)
+
+
+def _add_hl_sp(cpu: CPU) -> None:
+    a = read_pair(cpu, RegisterPair.SP)
+    b = cpu.registers.hl
+    result, flags = add16(a, b)
+
+    cpu.registers.apply(flags)
+    write_pair(cpu, RegisterPair.HL, result)
+
+
+def _add_hl_hl(cpu: CPU) -> None:
+    a = cpu.registers.hl
+    result, flags = add16(a, a)
+
+    cpu.registers.apply(flags)
+    write_pair(cpu, RegisterPair.HL, result)
+
+
 OPCODES: Final[dict[int, Instruction]] = {
     # Address         OPCODE     CYCLES
     0x00: Instruction("NOP", 4, _nop),
@@ -590,4 +693,12 @@ OPCODES: Final[dict[int, Instruction]] = {
     **_alu_block(),
     **_alu_immediate_block(),
     **_inc_dec_block(),
+    0x01: Instruction("LD BC, d16", 12, _ld_bc_d16),
+    0x11: Instruction("LD DE, d16", 12, _ld_de_d16),
+    0x03: Instruction("INC BC", 8, _inc_bc),
+    0x0B: Instruction("DEC BC", 8, _dec_bc),
+    0x09: Instruction("ADD HL, BC", 8, _add_hl_bc),
+    0x19: Instruction("ADD HL, DE", 8, _add_hl_de),
+    0x29: Instruction("ADD HL, HL", 8, _add_hl_hl),
+    0x39: Instruction("ADD HL, SP", 8, _add_hl_sp),
 }
