@@ -4,6 +4,7 @@ from pathlib import Path
 from typing import Final, Self
 
 from gameboy import memory_map
+from gameboy.bits import high_byte, join_bytes, low_byte
 
 ENTRY_POINT: Final = 0x0100
 LOGO: Final = slice(0x0104, 0x0134)
@@ -149,6 +150,13 @@ class Cartridge:
 
     # This will be the command interface to MBC:
     def write(self, address: int, value: int) -> None: ...
+
+    def read16(self, address: int) -> int:
+        return join_bytes(self.read(address + 1), self.read(address))
+
+    def write16(self, address: int, value: int) -> None:
+        self.write(address, low_byte(value))
+        self.write(address + 1, high_byte(value))
 
     @classmethod
     def from_bytes(cls, data: bytes) -> Self:

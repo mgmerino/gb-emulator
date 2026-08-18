@@ -10,6 +10,7 @@ from typing import Protocol
 
 import pytest
 
+from gameboy.bits import high_byte, join_bytes, low_byte
 from gameboy.cartridge import Cartridge
 from gameboy.cpu import CPU, Registers
 from gameboy.memory import Bus
@@ -38,6 +39,13 @@ class FakeCartridge:
     def write(self, address: int, value: int) -> None:
         self.writes.append((address, value))
 
+    def read16(self, address: int) -> int:
+        return join_bytes(self.read(address + 1), self.read(address))
+
+    def write16(self, address: int, value: int) -> None:
+        self.write(address, low_byte(value))
+        self.write(address + 1, high_byte(value))
+
 
 class FlatMemory:
     """64 KiB of RAM with no regions and no rules."""
@@ -50,6 +58,13 @@ class FlatMemory:
 
     def write(self, address: int, value: int) -> None:
         self.data[address] = value
+
+    def read16(self, address: int) -> int:
+        return join_bytes(self.read(address + 1), self.read(address))
+
+    def write16(self, address: int, value: int) -> None:
+        self.write(address, low_byte(value))
+        self.write(address + 1, high_byte(value))
 
 
 @pytest.fixture

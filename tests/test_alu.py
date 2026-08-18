@@ -172,3 +172,37 @@ def test_inc_and_dec_do_not_write_the_carry_flag(value: int) -> None:
 
     assert inc_flags.c is None
     assert dec_flags.c is None
+
+
+ADD16_CASES: list[tuple[int, int, int, bool, bool]] = [
+    # a, b, result, H, C
+    (0x0000, 0x0001, 0x0001, False, False),
+    (0x0FFF, 0x0001, 0x1000, True, False),  # exactly the bit-11 boundary
+    (0x00FF, 0x0001, 0x0100, False, False),  # bit-7 carry is NOT a half-carry
+    (0x8A23, 0x0605, 0x9028, True, False),  # 0xA23 + 0x605 crosses bit 11
+    (0x0800, 0x0800, 0x1000, True, False),
+    (0x8000, 0x8000, 0x0000, False, True),  # carry out of bit 15, none at 11
+    (0xFFFF, 0x0001, 0x0000, True, True),  # both, and it wraps
+]
+
+
+@pytest.mark.parametrize(
+    "a, b, expected, half_carry, carry",
+    ADD16_CASES,
+    ids=[f"{a:#06x}+{b:#06x}" for a, b, _, _, _ in ADD16_CASES],
+)
+def test_add16_result_and_carries(
+    a: int, b: int, expected: int, half_carry: bool, carry: bool
+) -> None:
+    result, flags = alu.add16(a, b)
+
+    assert result == expected
+    assert flags.h is half_carry
+    assert flags.c is carry
+    assert flags.n is False
+
+
+def test_add16_never_writes_the_zero_flag() -> None:
+    _, flags = alu.add16(0x8000, 0x8000)
+
+    assert flags.z is None

@@ -15,7 +15,7 @@ from dataclasses import dataclass
 from enum import IntEnum
 from typing import Final, Self
 
-from gameboy.alu import Flags, adc, add, and_, dec, inc, or_, sbc, sub, xor
+from gameboy.alu import Flags, adc, add, add16, and_, dec, inc, or_, sbc, sub, xor
 from gameboy.bits import get_bit, high_byte, join_bytes, low_byte, u16
 from gameboy.memory import MemoryDevice
 
@@ -265,6 +265,39 @@ def write_operand(cpu: CPU, operand: Operand, value: int) -> None:
             cpu.registers.h = value
         case Operand.L:
             cpu.registers.l = value
+
+
+class RegisterPair(IntEnum):
+    """The two-bit pair index in bits 5 and 4 of the 16-bit instructions."""
+
+    BC = 0b00
+    DE = 0b01
+    HL = 0b10
+    SP = 0b11
+
+
+def read_pair(cpu: CPU, pair: RegisterPair) -> int:
+    match pair:
+        case RegisterPair.BC:
+            return cpu.registers.bc
+        case RegisterPair.DE:
+            return cpu.registers.de
+        case RegisterPair.HL:
+            return cpu.registers.hl
+        case RegisterPair.SP:
+            return cpu.registers.sp
+
+
+def write_pair(cpu: CPU, pair: RegisterPair, value: int) -> None:
+    match pair:
+        case RegisterPair.BC:
+            cpu.registers.bc = value
+        case RegisterPair.DE:
+            cpu.registers.de = value
+        case RegisterPair.HL:
+            cpu.registers.hl = value
+        case RegisterPair.SP:
+            cpu.registers.sp = value
 
 
 T_CYCLES_PER_ACCESS = 4
@@ -563,6 +596,87 @@ def _inc_dec_block() -> dict[int, Instruction]:
     return instructions
 
 
+# ------------------------------
+# 16-bit loads and arithmetic
+# ------------------------------
+#
+# | Opcodes                | Instruction  | Cycles | Flags                     |
+# | ---------------------- | ------------ | ------ | ------------------------- |
+# | 0x01 0x11 0x21 0x31    | LD rr, d16   | 12     | none                      |
+# | 0x08                   | LD (a16), SP | 20     | none                      |
+# | 0x03 0x13 0x23 0x33    | INC rr       | 8      | none at all               |
+# | 0x0B 0x1B 0x2B 0x3B    | DEC rr       | 8      | none at all               |
+# | 0x09 0x19 0x29 0x39    | ADD HL, rr   | 8      | Z kept, N=0, H@11, C@15   |
+
+
+_LD_PAIR_IMMEDIATE_CYCLES = 12
+_PAIR_INTERNAL_CYCLES = 8
+_LD_A16_SP_CYCLES = 20
+
+
+def _make_ld_pair_immediate(pair: RegisterPair) -> Callable[[CPU], None]:
+    def execute(cpu: CPU) -> None:
+        write_pair(cpu, pair, cpu.fetch_u16())
+
+    return execute
+
+
+def _make_inc_pair(pair: RegisterPair) -> Callable[[CPU], None]:
+    # No flags
+    def execute(cpu: CPU) -> None:
+        write_pair(cpu, pair, u16(read_pair(cpu, pair) + 1))
+
+    return execute
+
+
+def _make_dec_pair(pair: RegisterPair) -> Callable[[CPU], None]:
+    def execute(cpu: CPU) -> None:
+        write_pair(cpu, pair, u16(read_pair(cpu, pair) - 1))
+
+    return execute
+
+
+def _make_add_hl(pair: RegisterPair) -> Callable[[CPU], None]:
+    def execute(cpu: CPU) -> None:
+        result, flags = add16(cpu.registers.hl, read_pair(cpu, pair))
+        cpu.registers.apply(flags)
+        cpu.registers.hl = result
+
+    return execute
+
+
+def _ld_a16_sp(cpu: CPU) -> None:
+    address = cpu.fetch_u16()
+    cpu.bus.write16(address, cpu.registers.sp)
+
+
+# base opcode, mnemonic template, cycles, maker
+_PAIR_FAMILIES: Final[
+    tuple[tuple[int, str, int, Callable[[RegisterPair], Callable[[CPU], None]]], ...]
+] = (
+    (0x01, "LD {}, d16", _LD_PAIR_IMMEDIATE_CYCLES, _make_ld_pair_immediate),
+    (0x03, "INC {}", _PAIR_INTERNAL_CYCLES, _make_inc_pair),
+    (0x0B, "DEC {}", _PAIR_INTERNAL_CYCLES, _make_dec_pair),
+    (0x09, "ADD HL, {}", _PAIR_INTERNAL_CYCLES, _make_add_hl),
+)
+
+
+def _pair_block() -> dict[int, Instruction]:
+    instructions: dict[int, Instruction] = {}
+
+    for base, template, cycles, make in _PAIR_FAMILIES:
+        for opcode in range(base, base + 0x40, 0x10):
+            pair = RegisterPair((opcode >> 4) & 0b11)
+
+            instructions[opcode] = Instruction(
+                template.format(pair.name),
+                cycles,
+                make(pair),
+            )
+
+    return instructions
+
+
 OPCODES: Final[dict[int, Instruction]] = {
     # Address         OPCODE     CYCLES
     0x00: Instruction("NOP", 4, _nop),
@@ -590,4 +704,6 @@ OPCODES: Final[dict[int, Instruction]] = {
     **_alu_block(),
     **_alu_immediate_block(),
     **_inc_dec_block(),
+    0x08: Instruction("LD (a16), SP", _LD_A16_SP_CYCLES, _ld_a16_sp),
+    **_pair_block(),
 }
