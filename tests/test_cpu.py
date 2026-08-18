@@ -1238,9 +1238,9 @@ def test_inc_dec_hl_read_and_write_through_the_bus(
 
 PAIRS: list[tuple[int, RegisterPair]] = [
     (0x00, RegisterPair.BC),
-    # (0x10, RegisterPair.DE),
-    # (0x20, RegisterPair.HL),
-    # (0x30, RegisterPair.SP),
+    (0x10, RegisterPair.DE),
+    (0x20, RegisterPair.HL),
+    (0x30, RegisterPair.SP),
 ]
 
 # base opcode, mnemonic template, cycles

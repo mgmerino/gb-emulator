@@ -609,61 +609,72 @@ def _inc_dec_block() -> dict[int, Instruction]:
 # | 0x09 0x19 0x29 0x39    | ADD HL, rr   | 8      | Z kept, N=0, H@11, C@15   |
 
 
-def _ld_bc_d16(cpu: CPU) -> None:
-    value = cpu.fetch_u16()
-    write_pair(cpu, RegisterPair.BC, value)
+_LD_PAIR_IMMEDIATE_CYCLES = 12
+_PAIR_INTERNAL_CYCLES = 8
+_LD_A16_SP_CYCLES = 20
 
 
-def _ld_de_d16(cpu: CPU) -> None:
-    value = cpu.fetch_u16()
-    write_pair(cpu, RegisterPair.DE, value)
+def _make_ld_pair_immediate(pair: RegisterPair) -> Callable[[CPU], None]:
+    def execute(cpu: CPU) -> None:
+        write_pair(cpu, pair, cpu.fetch_u16())
+
+    return execute
 
 
-def _inc_bc(cpu: CPU) -> None:
-    current_value = read_pair(cpu, RegisterPair.BC)
-    result = u16(current_value + 1)
-    write_pair(cpu, RegisterPair.BC, result)
+def _make_inc_pair(pair: RegisterPair) -> Callable[[CPU], None]:
+    # No flags
+    def execute(cpu: CPU) -> None:
+        write_pair(cpu, pair, u16(read_pair(cpu, pair) + 1))
+
+    return execute
 
 
-def _dec_bc(cpu: CPU) -> None:
-    current_value = read_pair(cpu, RegisterPair.BC)
-    result = u16(current_value - 1)
-    write_pair(cpu, RegisterPair.BC, result)
+def _make_dec_pair(pair: RegisterPair) -> Callable[[CPU], None]:
+    def execute(cpu: CPU) -> None:
+        write_pair(cpu, pair, u16(read_pair(cpu, pair) - 1))
+
+    return execute
 
 
-def _add_hl_bc(cpu: CPU) -> None:
-    a = read_pair(cpu, RegisterPair.BC)
-    b = cpu.registers.hl
-    result, flags = add16(a, b)
+def _make_add_hl(pair: RegisterPair) -> Callable[[CPU], None]:
+    def execute(cpu: CPU) -> None:
+        result, flags = add16(cpu.registers.hl, read_pair(cpu, pair))
+        cpu.registers.apply(flags)
+        cpu.registers.hl = result
 
-    cpu.registers.apply(flags)
-    write_pair(cpu, RegisterPair.HL, result)
-
-
-def _add_hl_de(cpu: CPU) -> None:
-    a = read_pair(cpu, RegisterPair.DE)
-    b = cpu.registers.hl
-    result, flags = add16(a, b)
-
-    cpu.registers.apply(flags)
-    write_pair(cpu, RegisterPair.HL, result)
+    return execute
 
 
-def _add_hl_sp(cpu: CPU) -> None:
-    a = read_pair(cpu, RegisterPair.SP)
-    b = cpu.registers.hl
-    result, flags = add16(a, b)
-
-    cpu.registers.apply(flags)
-    write_pair(cpu, RegisterPair.HL, result)
+def _ld_a16_sp(cpu: CPU) -> None:
+    address = cpu.fetch_u16()
+    cpu.bus.write16(address, cpu.registers.sp)
 
 
-def _add_hl_hl(cpu: CPU) -> None:
-    a = cpu.registers.hl
-    result, flags = add16(a, a)
+# base opcode, mnemonic template, cycles, maker
+_PAIR_FAMILIES: Final[
+    tuple[tuple[int, str, int, Callable[[RegisterPair], Callable[[CPU], None]]], ...]
+] = (
+    (0x01, "LD {}, d16", _LD_PAIR_IMMEDIATE_CYCLES, _make_ld_pair_immediate),
+    (0x03, "INC {}", _PAIR_INTERNAL_CYCLES, _make_inc_pair),
+    (0x0B, "DEC {}", _PAIR_INTERNAL_CYCLES, _make_dec_pair),
+    (0x09, "ADD HL, {}", _PAIR_INTERNAL_CYCLES, _make_add_hl),
+)
 
-    cpu.registers.apply(flags)
-    write_pair(cpu, RegisterPair.HL, result)
+
+def _pair_block() -> dict[int, Instruction]:
+    instructions: dict[int, Instruction] = {}
+
+    for base, template, cycles, make in _PAIR_FAMILIES:
+        for opcode in range(base, base + 0x40, 0x10):
+            pair = RegisterPair((opcode >> 4) & 0b11)
+
+            instructions[opcode] = Instruction(
+                template.format(pair.name),
+                cycles,
+                make(pair),
+            )
+
+    return instructions
 
 
 OPCODES: Final[dict[int, Instruction]] = {
@@ -693,12 +704,6 @@ OPCODES: Final[dict[int, Instruction]] = {
     **_alu_block(),
     **_alu_immediate_block(),
     **_inc_dec_block(),
-    0x01: Instruction("LD BC, d16", 12, _ld_bc_d16),
-    0x11: Instruction("LD DE, d16", 12, _ld_de_d16),
-    0x03: Instruction("INC BC", 8, _inc_bc),
-    0x0B: Instruction("DEC BC", 8, _dec_bc),
-    0x09: Instruction("ADD HL, BC", 8, _add_hl_bc),
-    0x19: Instruction("ADD HL, DE", 8, _add_hl_de),
-    0x29: Instruction("ADD HL, HL", 8, _add_hl_hl),
-    0x39: Instruction("ADD HL, SP", 8, _add_hl_sp),
+    0x08: Instruction("LD (a16), SP", _LD_A16_SP_CYCLES, _ld_a16_sp),
+    **_pair_block(),
 }
