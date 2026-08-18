@@ -1399,3 +1399,145 @@ def test_ld_a16_sp_writes_the_low_byte_first(cpu_running: CpuRunning) -> None:
     assert cycles == 20
     assert cpu.registers.pc == 0x0103
     assert cpu.registers.f == 0x00
+
+
+#
+# --- DAA, CPL, SCF, CCF ---
+#
+
+# Four opcodes sharing no bit pattern, so all four are written by hand. Each
+# costs 4 cycles: one fetch, no operand, no bus access.
+FLAG_OPS: list[tuple[int, str]] = [
+    (0x27, "DAA"),
+    (0x2F, "CPL"),
+    (0x37, "SCF"),
+    (0x3F, "CCF"),
+]
+
+
+@pytest.mark.parametrize("opcode, name", FLAG_OPS, ids=[n for _, n in FLAG_OPS])
+def test_flag_ops_are_present_named_and_cost_four(opcode: int, name: str) -> None:
+    assert OPCODES[opcode].name == name
+    assert OPCODES[opcode].cycles == 4
+
+
+@pytest.mark.parametrize(
+    "start_f, expected_f",
+    [
+        # Z and C are carried through untouched; N and H are always set.
+        (0x00, 0x60),
+        (0x90, 0xF0),  # Z and C set going in, still set coming out
+    ],
+    ids=["flags-clear", "z-and-c-set"],
+)
+def test_cpl_flips_every_bit(
+    cpu_running: CpuRunning, start_f: int, expected_f: int
+) -> None:
+    cpu = cpu_running(0x2F)
+    cpu.registers.a = 0x35
+    cpu.registers.f = start_f
+
+    cycles = cpu.step()
+
+    assert cpu.registers.a == 0xCA  # 0b0011_0101 -> 0b1100_1010
+    assert cpu.registers.f == expected_f
+    assert cycles == 4
+
+
+def test_cpl_twice_restores_the_accumulator(cpu_running: CpuRunning) -> None:
+    # One's complement is its own inverse. A test that only checked a single
+    # flip would also pass against `a ^ 0x0F` or a stray mask.
+    cpu = cpu_running(0x2F, 0x2F)
+    cpu.registers.a = 0x35
+
+    cpu.step()
+    cpu.step()
+
+    assert cpu.registers.a == 0x35
+
+
+@pytest.mark.parametrize(
+    "start_f, expected_f",
+    [
+        (0x00, 0x10),  # C set, Z stays clear
+        (0xF0, 0x90),  # N and H cleared, Z and C survive as set
+    ],
+    ids=["flags-clear", "flags-set"],
+)
+def test_scf_sets_the_carry_and_clears_n_and_h(
+    cpu_running: CpuRunning, start_f: int, expected_f: int
+) -> None:
+    cpu = cpu_running(0x37)
+    cpu.registers.f = start_f
+
+    cycles = cpu.step()
+
+    assert cpu.registers.f == expected_f
+    assert cycles == 4
+
+
+@pytest.mark.parametrize(
+    "start_f, expected_f",
+    [
+        (0x00, 0x10),  # carry was clear, now set
+        (0xF0, 0x80),  # carry was set, now clear; N and H cleared, Z survives
+    ],
+    ids=["carry-clear", "carry-set"],
+)
+def test_ccf_flips_the_carry_and_clears_n_and_h(
+    cpu_running: CpuRunning, start_f: int, expected_f: int
+) -> None:
+    cpu = cpu_running(0x3F)
+    cpu.registers.f = start_f
+
+    cycles = cpu.step()
+
+    assert cpu.registers.f == expected_f
+    assert cycles == 4
+
+
+@pytest.mark.parametrize("carry", [False, True], ids=["from-clear", "from-set"])
+def test_ccf_twice_restores_the_carry(cpu_running: CpuRunning, carry: bool) -> None:
+    # A property rather than a case: this cannot pass against an implementation
+    # that sets the carry instead of complementing it.
+    cpu = cpu_running(0x3F, 0x3F)
+    cpu.registers.c_flag = carry
+
+    cpu.step()
+    cpu.step()
+
+    assert cpu.registers.c_flag is carry
+
+
+# alu.daa already has twenty thousand cases, so these are end-to-end instead:
+# a small program per row, proving the whole chain works -- immediate load,
+# ALU block, flags reaching the registers, and DAA reading them back out.
+DAA_PROGRAMS: list[tuple[tuple[int, ...], int, int, str]] = [
+    # program bytes, resulting A, resulting F, what it computes
+    ((0x3E, 0x37, 0xC6, 0x05, 0x27), 0x42, 0x00, "37 + 5 = 42"),
+    ((0x3E, 0x91, 0xC6, 0x11, 0x27), 0x02, 0x10, "91 + 11 = 102, carry out"),
+    ((0x3E, 0x50, 0xC6, 0x50, 0x27), 0x00, 0x90, "50 + 50 = 100, Z and carry"),
+    ((0x3E, 0x32, 0xD6, 0x05, 0x27), 0x27, 0x40, "32 - 5 = 27, N kept"),
+]
+
+
+@pytest.mark.parametrize(
+    "program, expected_a, expected_f, note",
+    DAA_PROGRAMS,
+    ids=[note for *_, note in DAA_PROGRAMS],
+)
+def test_daa_corrects_a_bcd_program(
+    cpu_running: CpuRunning,
+    program: tuple[int, ...],
+    expected_a: int,
+    expected_f: int,
+    note: str,
+) -> None:
+    cpu = cpu_running(*program)
+
+    for _ in range(3):  # LD A, d8 ; ADD or SUB A, d8 ; DAA
+        cpu.step()
+
+    assert cpu.registers.a == expected_a
+    assert cpu.registers.f == expected_f
+    assert cpu.registers.pc == 0x0105  # 2 + 2 + 1 bytes
