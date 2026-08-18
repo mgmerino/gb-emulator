@@ -1384,3 +1384,18 @@ def test_add_hl_hl_doubles_the_pointer(cpu_running: CpuRunning) -> None:
     cpu.step()
 
     assert cpu.registers.hl == 0x2468
+
+
+def test_ld_a16_sp_writes_the_low_byte_first(cpu_running: CpuRunning) -> None:
+    address = 0xC000
+    cpu = cpu_running(0x08, 0x00, 0xC0)  # LD (0xC000), SP
+    cpu.registers.sp = 0xFFFE
+
+    cycles = cpu.step()
+
+    assert cpu.bus.read(address) == 0xFE  # low byte at the address
+    assert cpu.bus.read(address + 1) == 0xFF  # high byte after it
+    assert cpu.bus.read16(address) == 0xFFFE
+    assert cycles == 20
+    assert cpu.registers.pc == 0x0103
+    assert cpu.registers.f == 0x00
