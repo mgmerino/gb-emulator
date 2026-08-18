@@ -15,8 +15,8 @@ from dataclasses import dataclass
 from enum import IntEnum
 from typing import Final, Self
 
-from gameboy.alu import Flags, adc, add, add16, and_, dec, inc, or_, sbc, sub, xor
-from gameboy.bits import get_bit, high_byte, join_bytes, low_byte, u16
+from gameboy.alu import Flags, adc, add, add16, and_, daa, dec, inc, or_, sbc, sub, xor
+from gameboy.bits import get_bit, high_byte, join_bytes, low_byte, u8, u16
 from gameboy.memory import MemoryDevice
 
 # Since masking is _expected_ to be executed from the top layer, we want to ensure
@@ -677,8 +677,40 @@ def _pair_block() -> dict[int, Instruction]:
     return instructions
 
 
+# Accumulator and flag oddities
+#
+# | Opcode | Mnemonic | Effect              | Z         | N | H | C         |
+# | ------ | -------- | ------------------- | --------- | - | - | --------- |
+# | 0x27   | DAA      | fix A back into BCD | result    | - | 0 | see below |
+# | 0x2F   | CPL      | A = ~A              | -         | 1 | 1 | -         |
+# | 0x37   | SCF      | set carry           | -         | 0 | 0 | 1         |
+# | 0x3F   | CCF      | flip carry          | -         | 0 | 0 | inverted  |
+
+def _daa(cpu: CPU) -> None:
+    result, flags = daa(
+        cpu.registers.a,
+        cpu.registers.n_flag,
+        cpu.registers.h_flag,
+        cpu.registers.c_flag,
+    )
+    cpu.registers.apply(flags)
+    cpu.registers.a = result
+
+
+def _cpl(cpu: CPU) -> None:
+    cpu.registers.apply(Flags(n=True, h=True))
+    cpu.registers.a = u8(~cpu.registers.a) # notice the mask to wrap on < 0
+
+
+def _scf(cpu: CPU) -> None:
+    cpu.registers.apply(Flags(n=False, h=False, c=True))
+
+
+def _ccf(cpu: CPU) -> None:
+    cpu.registers.apply(Flags(n=False, h=False, c=not cpu.registers.c_flag))
+
+
 OPCODES: Final[dict[int, Instruction]] = {
-    # Address         OPCODE     CYCLES
     0x00: Instruction("NOP", 4, _nop),
     0xC3: Instruction("JP a16", 16, _jp_a16),
     0x02: Instruction("LD (BC), A", 8, _ld_bc_a),
@@ -706,4 +738,8 @@ OPCODES: Final[dict[int, Instruction]] = {
     **_inc_dec_block(),
     0x08: Instruction("LD (a16), SP", _LD_A16_SP_CYCLES, _ld_a16_sp),
     **_pair_block(),
+    0x27: Instruction("DAA", 4, _daa),
+    0x2F: Instruction("CPL", 4, _cpl),
+    0x37: Instruction("SCF", 4, _scf),
+    0x3F: Instruction("CCF", 4, _ccf),
 }
