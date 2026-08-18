@@ -206,3 +206,96 @@ def test_add16_never_writes_the_zero_flag() -> None:
     _, flags = alu.add16(0x8000, 0x8000)
 
     assert flags.z is None
+
+
+def bcd(value: int) -> int:
+    """Encode 0-99 as binary-coded decimal: one decimal digit per nibble."""
+    return ((value // 10) << 4) | (value % 10)
+
+
+DAA_CASES: list[tuple[int, bool, bool, bool, int, bool, str]] = [
+    # a, n, h, c, result, carry out, what produced `a`
+    (0x42, False, False, False, 0x42, False, "already valid BCD, nothing to fix"),
+    (0x3C, False, False, False, 0x42, False, "0x37 + 0x05 -> 37 + 5 = 42"),
+    (0x9A, False, False, False, 0x00, True, "0x99 + 0x01 -> 99 + 1 = 100"),
+    (0x32, False, True, True, 0x98, True, "0x99 + 0x99 -> 99 + 99 = 198"),
+    (0x0A, False, False, False, 0x10, False, "0x05 + 0x05 -> 5 + 5 = 10"),
+    (0x2D, True, True, False, 0x27, False, "0x32 - 0x05 -> 32 - 5 = 27"),
+    (0xE0, True, False, True, 0x80, True, "0x20 - 0x40 -> 20 - 40 = -20"),
+]
+
+
+@pytest.mark.parametrize(
+    "a, n, h, c, expected, expected_carry, note",
+    DAA_CASES,
+    ids=[note for *_, note in DAA_CASES],
+)
+def test_daa_named_cases(
+    a: int,
+    n: bool,
+    h: bool,
+    c: bool,
+    expected: int,
+    expected_carry: bool,
+    note: str,
+) -> None:
+    result, flags = alu.daa(a, n, h, c)
+
+    assert result == expected
+    assert flags.c is expected_carry
+
+
+def test_daa_round_trips_every_bcd_addition() -> None:
+    """For every pair of decimal values, ADD then DAA is decimal addition."""
+    for x in range(100):
+        for y in range(100):
+            total, add_flags = alu.add(bcd(x), bcd(y))
+            # add always writes H and C, but Flags cannot say so in its type:
+            # the None is there for the operations that leave a flag alone.
+            assert add_flags.h is not None and add_flags.c is not None
+
+            result, flags = alu.daa(total, n=False, h=add_flags.h, c=add_flags.c)
+
+            assert result == bcd((x + y) % 100), f"{x} + {y}"
+            assert flags.c is (x + y >= 100), f"carry on {x} + {y}"
+
+
+def test_daa_round_trips_every_bcd_subtraction() -> None:
+    """The mirror: this branch must leave the carry alone."""
+    for x in range(100):
+        for y in range(100):
+            difference, sub_flags = alu.sub(bcd(x), bcd(y))
+            assert sub_flags.h is not None and sub_flags.c is not None
+
+            result, flags = alu.daa(difference, n=True, h=sub_flags.h, c=sub_flags.c)
+
+            assert result == bcd((x - y) % 100), f"{x} - {y}"
+            assert flags.c is (y > x), f"borrow on {x} - {y}"
+
+
+@pytest.mark.parametrize(
+    "a, n, h, c, expected",
+    [
+        (0x42, False, False, False, 0x42),  # no adjustment, non-zero result
+        (0xA0, False, False, False, 0x00),  # adjustment fires and lands on zero
+        (0x9A, False, False, False, 0x00),  # both branches fire, lands on zero
+        (0x00, False, False, False, 0x00),  # already zero, nothing to adjust
+    ],
+    ids=["0x42", "0xA0", "0x9A", "0x00"],
+)
+def test_daa_takes_the_zero_flag_from_the_result(
+    a: int, n: bool, h: bool, c: bool, expected: int
+) -> None:
+    # Z describes the adjusted accumulator, not if an adjustment happened.
+    result, flags = alu.daa(a, n, h, c)
+
+    assert result == expected
+    assert flags.z is (result == 0)
+
+
+@pytest.mark.parametrize("n", [False, True], ids=["after-add", "after-sub"])
+def test_daa_clears_the_half_carry_and_leaves_n_alone(n: bool) -> None:
+    _, flags = alu.daa(0x9A, n=n, h=True, c=True)
+
+    assert flags.h is False
+    assert flags.n is None
