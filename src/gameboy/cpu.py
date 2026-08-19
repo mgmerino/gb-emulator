@@ -696,6 +696,7 @@ def _pair_block() -> dict[int, Instruction]:
 # | 0x37   | SCF      | set carry           | -         | 0 | 0 | 1         |
 # | 0x3F   | CCF      | flip carry          | -         | 0 | 0 | inverted  |
 
+
 def _daa(cpu: CPU) -> None:
     result, flags = daa(
         cpu.registers.a,
@@ -709,7 +710,7 @@ def _daa(cpu: CPU) -> None:
 
 def _cpl(cpu: CPU) -> None:
     cpu.registers.apply(Flags(n=True, h=True))
-    cpu.registers.a = u8(~cpu.registers.a) # notice the mask to wrap on < 0
+    cpu.registers.a = u8(~cpu.registers.a)  # notice the mask to wrap on < 0
 
 
 def _scf(cpu: CPU) -> None:
