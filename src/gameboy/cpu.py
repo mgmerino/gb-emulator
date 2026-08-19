@@ -753,7 +753,7 @@ def _ccf(cpu: CPU) -> None:
 
 def _jr(cpu: CPU) -> None:
     offset_jump = to_signed8(cpu.fetch_u8())
-    cpu.registers.pc = cpu.registers.pc + offset_jump
+    cpu.registers.pc = u16(cpu.registers.pc + offset_jump)
 
 
 def _jr_nz(cpu: CPU) -> bool:

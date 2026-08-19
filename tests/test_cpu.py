@@ -1699,3 +1699,26 @@ def test_the_jr_table_entries_are_named_and_costed(opcode: int, name: str) -> No
     else:
         assert instruction.cycles == 8
         assert instruction.cycles_when_taken == 12
+
+
+@pytest.mark.parametrize(
+    ("opcode", "z", "c"),
+    [
+        (0x18, False, False),  # JR e8,     always taken
+        (0x20, False, False),  # JR NZ, e8, Z clear -> taken
+        (0x28, True, False),  # JR Z, e8,  Z set    -> taken
+        (0x30, False, False),  # JR NC, e8, C clear -> taken
+        (0x38, False, True),  # JR C, e8,  C set    -> taken
+    ],
+    ids=["JR", "JR NZ", "JR Z", "JR NC", "JR C"],
+)
+def test_a_taken_jr_wraps_pc_at_the_bottom_of_memory(
+    cpu_running: CpuRunning, opcode: int, z: bool, c: bool
+) -> None:
+    cpu = cpu_running(opcode, 0xFC, at=0x0000)
+    cpu.registers.z_flag = z
+    cpu.registers.c_flag = c
+
+    cpu.step()
+
+    assert cpu.registers.pc == 0xFFFE
