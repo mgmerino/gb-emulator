@@ -792,6 +792,11 @@ def _jr_c_e8(cpu: CPU) -> bool:
     return False
 
 
+def _jp_hl(cpu: CPU) -> None:
+    address = cpu.registers.hl
+    cpu.registers.pc = address
+
+
 def _jp_nz_a16(cpu: CPU) -> bool:
     address = cpu.fetch_u16()
     if condition_met(cpu, Condition.NZ):
@@ -869,4 +874,5 @@ OPCODES: Final[dict[int, Instruction]] = {
     0xCA: Instruction("JP Z, a16", 12, _jp_z_a16, 16),
     0xD2: Instruction("JP NC, a16", 12, _jp_nc_a16, 16),
     0xDA: Instruction("JP C, a16", 12, _jp_c_a16, 16),
+    0xE9: Instruction("JP HL", 4, _jp_hl),
 }

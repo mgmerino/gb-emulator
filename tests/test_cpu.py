@@ -1786,3 +1786,26 @@ def test_the_jp_table_entries_are_named_and_costed(opcode: int, name: str) -> No
     else:
         assert instruction.cycles == 12
         assert instruction.cycles_when_taken == 16
+
+
+# --- JP HL ---
+
+
+def test_jp_hl_jumps_to_the_value_of_hl_without_reading_memory(
+    cpu_running: CpuRunning,
+) -> None:
+    cpu = cpu_running(0xE9)
+    cpu.registers.hl = 0x4000
+    cpu.bus.write(0x4000, 0x99)
+
+    assert cpu.step() == 4
+    assert cpu.registers.pc == 0x4000
+
+
+def test_the_jp_hl_table_entry_is_named_and_costed() -> None:
+    instruction = OPCODES[0xE9]
+
+    assert instruction.name == "JP HL"
+    assert instruction.cycles == 4
+    # Unconditional: there is no taken/not-taken pair to declare.
+    assert instruction.cycles_when_taken is None
