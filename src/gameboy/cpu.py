@@ -879,6 +879,38 @@ def _call_c_a16(cpu: CPU) -> bool:
     return False
 
 
+def _ret(cpu: CPU) -> None:
+    cpu.registers.pc = cpu.pop16()
+
+
+def _ret_nz(cpu: CPU) -> bool:
+    if condition_met(cpu, Condition.NZ):
+        cpu.registers.pc = cpu.pop16()
+        return True
+
+    return False
+
+def _ret_z(cpu: CPU) -> bool:
+    if condition_met(cpu, Condition.Z):
+        cpu.registers.pc = cpu.pop16()
+        return True
+
+    return False
+
+def _ret_nc(cpu: CPU) -> bool:
+    if condition_met(cpu, Condition.NC):
+        cpu.registers.pc = cpu.pop16()
+        return True
+
+    return False
+
+def _ret_c(cpu: CPU) -> bool:
+    if condition_met(cpu, Condition.C):
+        cpu.registers.pc = cpu.pop16()
+        return True
+
+    return False
+
 OPCODES: Final[dict[int, Instruction]] = {
     0x00: Instruction("NOP", 4, _nop),
     0xC3: Instruction("JP a16", 16, _jp_a16),
@@ -926,4 +958,9 @@ OPCODES: Final[dict[int, Instruction]] = {
     0xCC: Instruction("CALL Z, a16", 12, _call_z_a16, 24),
     0xD4: Instruction("CALL NC, a16", 12, _call_nc_a16, 24),
     0xDC: Instruction("CALL C, a16", 12, _call_c_a16, 24),
+    0xC9: Instruction("RET", 16, _ret),
+    0xC0: Instruction("RET NZ", 8, _ret_nz, 20),
+    0xC8: Instruction("RET Z", 8, _ret_z, 20),
+    0xD0: Instruction("RET NC", 8, _ret_nc, 20),
+    0xD8: Instruction("RET C", 8, _ret_c, 20),
 }

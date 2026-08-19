@@ -1927,3 +1927,127 @@ def test_the_conditional_call_table_entries_are_named_and_costed(
     assert instruction.name == name
     assert instruction.cycles == 12
     assert instruction.cycles_when_taken == 24
+
+
+# --- RET ---
+
+
+def test_ret_pops_the_return_address_into_pc(cpu_running: CpuRunning) -> None:
+    cpu = cpu_running(0xC9)
+    cpu.registers.sp = 0xFFFC
+    # Seeded a byte at a time rather than with write16, so this test states
+    # the little-endian claim RET depends on.
+    cpu.bus.write(0xFFFC, 0x50)
+    cpu.bus.write(0xFFFD, 0x01)
+
+    assert cpu.step() == 16
+    assert cpu.registers.pc == 0x0150
+    assert cpu.registers.sp == 0xFFFE
+
+
+def test_call_and_ret_leave_sp_where_they_found_it(cpu_running: CpuRunning) -> None:
+    # 0100  CD 10 01   CALL 0x0110
+    # 0110  C9         RET
+    cpu = cpu_running(0xCD, 0x10, 0x01)
+    cpu.bus.write(0x0110, 0xC9)
+    cpu.registers.sp = 0xFFFE
+
+    cpu.step()
+    cpu.step()
+
+    assert cpu.registers.pc == 0x0103
+    # The assertion worth making after every program test from here on: a
+    # balanced program ends with SP exactly where it started.
+    assert cpu.registers.sp == 0xFFFE
+
+
+def test_two_levels_of_call_and_ret_unwind_in_order(cpu_running: CpuRunning) -> None:
+    # 0100  CD 10 01   CALL 0x0110
+    # 0110  CD 20 01   CALL 0x0120
+    # 0113  C9         RET          -> back to 0103
+    # 0120  C9         RET          -> back to 0113
+    cpu = cpu_running(0xCD, 0x10, 0x01)
+    for address, byte in (
+        (0x0110, 0xCD),
+        (0x0111, 0x20),
+        (0x0112, 0x01),
+        (0x0113, 0xC9),
+        (0x0120, 0xC9),
+    ):
+        cpu.bus.write(address, byte)
+    cpu.registers.sp = 0xFFFE
+
+    for _ in range(4):
+        cpu.step()
+
+    assert cpu.registers.pc == 0x0103
+    assert cpu.registers.sp == 0xFFFE
+
+
+@pytest.mark.parametrize(
+    ("opcode", "z", "c", "taken"),
+    [
+        (0xC0, False, False, True),  # RET NZ, Z clear  -> taken
+        (0xC0, True, False, False),  # RET NZ, Z set    -> not taken
+        (0xC8, True, False, True),  # RET Z,  Z set     -> taken
+        (0xC8, False, False, False),  # RET Z,  Z clear -> not taken
+        (0xD0, False, False, True),  # RET NC, C clear  -> taken
+        (0xD0, False, True, False),  # RET NC, C set    -> not taken
+        (0xD8, False, True, True),  # RET C,  C set     -> taken
+        (0xD8, False, False, False),  # RET C,  C clear -> not taken
+    ],
+    ids=[
+        "NZ-taken",
+        "NZ-skipped",
+        "Z-taken",
+        "Z-skipped",
+        "NC-taken",
+        "NC-skipped",
+        "C-taken",
+        "C-skipped",
+    ],
+)
+def test_conditional_ret_pops_only_when_taken(
+    cpu_running: CpuRunning, opcode: int, z: bool, c: bool, taken: bool
+) -> None:
+    cpu = cpu_running(opcode)
+    cpu.registers.sp = 0xFFFC
+    cpu.bus.write16(0xFFFC, 0x0150)
+    cpu.registers.z_flag = z
+    cpu.registers.c_flag = c
+
+    cycles = cpu.step()
+
+    if taken:
+        assert cycles == 20
+        assert cpu.registers.pc == 0x0150
+        assert cpu.registers.sp == 0xFFFE
+    else:
+        assert cycles == 8
+        assert cpu.registers.pc == 0x0101
+        assert cpu.registers.sp == 0xFFFC
+
+
+@pytest.mark.parametrize(
+    ("opcode", "name"),
+    [
+        (0xC0, "RET NZ"),
+        (0xC8, "RET Z"),
+        (0xD0, "RET NC"),
+        (0xD8, "RET C"),
+    ],
+)
+def test_the_ret_table_entries_are_named_and_costed(opcode: int, name: str) -> None:
+    instruction = OPCODES[opcode]
+
+    assert instruction.name == name
+    assert instruction.cycles == 8
+    assert instruction.cycles_when_taken == 20
+
+
+def test_the_unconditional_ret_table_entry_is_named_and_costed() -> None:
+    instruction = OPCODES[0xC9]
+
+    assert instruction.name == "RET"
+    assert instruction.cycles == 16
+    assert instruction.cycles_when_taken is None
