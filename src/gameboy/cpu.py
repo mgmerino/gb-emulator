@@ -751,12 +751,12 @@ def _ccf(cpu: CPU) -> None:
 # instruction *after* the `JR`
 
 
-def _jr(cpu: CPU) -> None:
+def _jr_e8(cpu: CPU) -> None:
     offset_jump = to_signed8(cpu.fetch_u8())
     cpu.registers.pc = u16(cpu.registers.pc + offset_jump)
 
 
-def _jr_nz(cpu: CPU) -> bool:
+def _jr_nz_e8(cpu: CPU) -> bool:
     offset_jump = to_signed8(cpu.fetch_u8())
     if condition_met(cpu, Condition.NZ):
         cpu.registers.pc = u16(cpu.registers.pc + offset_jump)
@@ -765,7 +765,7 @@ def _jr_nz(cpu: CPU) -> bool:
     return False
 
 
-def _jr_z(cpu: CPU) -> bool:
+def _jr_z_e8(cpu: CPU) -> bool:
     offset_jump = to_signed8(cpu.fetch_u8())
     if condition_met(cpu, Condition.Z):
         cpu.registers.pc = u16(cpu.registers.pc + offset_jump)
@@ -774,7 +774,7 @@ def _jr_z(cpu: CPU) -> bool:
     return False
 
 
-def _jr_nc(cpu: CPU) -> bool:
+def _jr_nc_e8(cpu: CPU) -> bool:
     offset_jump = to_signed8(cpu.fetch_u8())
     if condition_met(cpu, Condition.NC):
         cpu.registers.pc = u16(cpu.registers.pc + offset_jump)
@@ -783,7 +783,7 @@ def _jr_nc(cpu: CPU) -> bool:
     return False
 
 
-def _jr_c(cpu: CPU) -> bool:
+def _jr_c_e8(cpu: CPU) -> bool:
     offset_jump = to_signed8(cpu.fetch_u8())
     if condition_met(cpu, Condition.C):
         cpu.registers.pc = u16(cpu.registers.pc + offset_jump)
@@ -792,7 +792,7 @@ def _jr_c(cpu: CPU) -> bool:
     return False
 
 
-def _jp_nz(cpu: CPU) -> bool:
+def _jp_nz_a16(cpu: CPU) -> bool:
     address = cpu.fetch_u16()
     if condition_met(cpu, Condition.NZ):
         cpu.registers.pc = address
@@ -801,7 +801,7 @@ def _jp_nz(cpu: CPU) -> bool:
     return False
 
 
-def _jp_z(cpu: CPU) -> bool:
+def _jp_z_a16(cpu: CPU) -> bool:
     address = cpu.fetch_u16()
     if condition_met(cpu, Condition.Z):
         cpu.registers.pc = address
@@ -810,7 +810,7 @@ def _jp_z(cpu: CPU) -> bool:
     return False
 
 
-def _jp_nc(cpu: CPU) -> bool:
+def _jp_nc_a16(cpu: CPU) -> bool:
     address = cpu.fetch_u16()
     if condition_met(cpu, Condition.NC):
         cpu.registers.pc = address
@@ -819,7 +819,7 @@ def _jp_nc(cpu: CPU) -> bool:
     return False
 
 
-def _jp_c(cpu: CPU) -> bool:
+def _jp_c_a16(cpu: CPU) -> bool:
     address = cpu.fetch_u16()
     if condition_met(cpu, Condition.C):
         cpu.registers.pc = address
@@ -860,13 +860,13 @@ OPCODES: Final[dict[int, Instruction]] = {
     0x2F: Instruction("CPL", 4, _cpl),
     0x37: Instruction("SCF", 4, _scf),
     0x3F: Instruction("CCF", 4, _ccf),
-    0x18: Instruction("JR e8", 12, _jr),
-    0x20: Instruction("JR NZ, e8", 8, _jr_nz, 12),
-    0x28: Instruction("JR Z, e8", 8, _jr_z, 12),
-    0x30: Instruction("JR NC, e8", 8, _jr_nc, 12),
-    0x38: Instruction("JR C, e8", 8, _jr_c, 12),
-    0xC2: Instruction("JP NZ, a16", 12, _jp_nz, 16),
-    0xCA: Instruction("JP Z, a16", 12, _jp_z, 16),
-    0xD2: Instruction("JP NC, a16", 12, _jp_nc, 16),
-    0xDA: Instruction("JP C, a16", 12, _jp_c, 16),
+    0x18: Instruction("JR e8", 12, _jr_e8),
+    0x20: Instruction("JR NZ, e8", 8, _jr_nz_e8, 12),
+    0x28: Instruction("JR Z, e8", 8, _jr_z_e8, 12),
+    0x30: Instruction("JR NC, e8", 8, _jr_nc_e8, 12),
+    0x38: Instruction("JR C, e8", 8, _jr_c_e8, 12),
+    0xC2: Instruction("JP NZ, a16", 12, _jp_nz_a16, 16),
+    0xCA: Instruction("JP Z, a16", 12, _jp_z_a16, 16),
+    0xD2: Instruction("JP NC, a16", 12, _jp_nc_a16, 16),
+    0xDA: Instruction("JP C, a16", 12, _jp_c_a16, 16),
 }
