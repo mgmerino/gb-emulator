@@ -139,6 +139,19 @@ def add16(a: int, b: int) -> tuple[int, Flags]:
     return result, flags
 
 
+def add_sp_e8(sp: int, signed_offset: int) -> tuple[int, Flags]:
+    # careful: we assume the offset is *already signed*
+    result = u16(sp + signed_offset)
+    flags = Flags(
+        False,
+        False,
+        (sp & 0x0F) + (signed_offset & 0x0F) > 0x0F,
+        (sp & 0xFF) + (signed_offset & 0xFF) > 0xFF,
+    )
+
+    return result, flags
+
+
 # Decimal Adjust Accumulator
 #
 # A bit of explanation, because this is a tricky one. Games store scores and

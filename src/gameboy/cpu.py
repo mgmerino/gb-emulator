@@ -15,7 +15,21 @@ from dataclasses import dataclass
 from enum import IntEnum
 from typing import Final, Self
 
-from gameboy.alu import Flags, adc, add, add16, and_, daa, dec, inc, or_, sbc, sub, xor
+from gameboy.alu import (
+    Flags,
+    adc,
+    add,
+    add16,
+    add_sp_e8,
+    and_,
+    daa,
+    dec,
+    inc,
+    or_,
+    sbc,
+    sub,
+    xor,
+)
 from gameboy.bits import get_bit, high_byte, join_bytes, low_byte, to_signed8, u8, u16
 from gameboy.memory import MemoryDevice
 
@@ -311,6 +325,37 @@ def write_pair(cpu: CPU, pair: RegisterPair, value: int) -> None:
             cpu.registers.hl = value
         case RegisterPair.SP:
             cpu.registers.sp = value
+
+
+class StackPair(IntEnum):
+    BC = 0b00
+    DE = 0b01
+    HL = 0b10
+    AF = 0b11
+
+
+def read_stack_pair(cpu: CPU, pair: StackPair) -> int:
+    match pair:
+        case StackPair.BC:
+            return cpu.registers.bc
+        case StackPair.DE:
+            return cpu.registers.de
+        case StackPair.HL:
+            return cpu.registers.hl
+        case StackPair.AF:
+            return cpu.registers.af
+
+
+def write_stack_pair(cpu: CPU, pair: StackPair, value: int) -> None:
+    match pair:
+        case StackPair.BC:
+            cpu.registers.bc = value
+        case StackPair.DE:
+            cpu.registers.de = value
+        case StackPair.HL:
+            cpu.registers.hl = value
+        case StackPair.AF:
+            cpu.registers.af = value
 
 
 class Condition(IntEnum):
@@ -915,6 +960,108 @@ def _ret_c(cpu: CPU) -> bool:
     return False
 
 
+def _push_bc(cpu: CPU) -> None:
+    value = read_stack_pair(cpu, StackPair.BC)
+    cpu.push16(value)
+
+
+def _push_de(cpu: CPU) -> None:
+    value = read_stack_pair(cpu, StackPair.DE)
+    cpu.push16(value)
+
+
+def _push_hl(cpu: CPU) -> None:
+    value = read_stack_pair(cpu, StackPair.HL)
+    cpu.push16(value)
+
+
+def _push_af(cpu: CPU) -> None:
+    value = read_stack_pair(cpu, StackPair.AF)
+    cpu.push16(value)
+
+
+def _pop_bc(cpu: CPU) -> None:
+    value = cpu.pop16()
+    write_stack_pair(cpu, StackPair.BC, value)
+
+
+def _pop_de(cpu: CPU) -> None:
+    value = cpu.pop16()
+    write_stack_pair(cpu, StackPair.DE, value)
+
+
+def _pop_hl(cpu: CPU) -> None:
+    value = cpu.pop16()
+    write_stack_pair(cpu, StackPair.HL, value)
+
+
+def _pop_af(cpu: CPU) -> None:
+    value = cpu.pop16()
+    write_stack_pair(cpu, StackPair.AF, value)
+
+
+def _rst_00(cpu: CPU) -> None:
+    cpu.push16(cpu.registers.pc)
+    cpu.registers.pc = 0x00
+
+
+def _rst_10(cpu: CPU) -> None:
+    cpu.push16(cpu.registers.pc)
+    cpu.registers.pc = 0x10
+
+
+def _rst_08(cpu: CPU) -> None:
+    cpu.push16(cpu.registers.pc)
+    cpu.registers.pc = 0x08
+
+
+def _rst_18(cpu: CPU) -> None:
+    cpu.push16(cpu.registers.pc)
+    cpu.registers.pc = 0x18
+
+
+def _rst_20(cpu: CPU) -> None:
+    cpu.push16(cpu.registers.pc)
+    cpu.registers.pc = 0x20
+
+
+def _rst_28(cpu: CPU) -> None:
+    cpu.push16(cpu.registers.pc)
+    cpu.registers.pc = 0x28
+
+
+def _rst_30(cpu: CPU) -> None:
+    cpu.push16(cpu.registers.pc)
+    cpu.registers.pc = 0x30
+
+
+def _rst_38(cpu: CPU) -> None:
+    cpu.push16(cpu.registers.pc)
+    cpu.registers.pc = 0x38
+
+
+def _add_sp_e8(cpu: CPU) -> None:
+    offset_jump = to_signed8(cpu.fetch_u8())
+    result, flags = add_sp_e8(cpu.registers.sp, offset_jump)
+
+    cpu.registers.apply(flags)
+
+    cpu.registers.sp = result
+
+
+def _ld_hl_sp_e8(cpu: CPU) -> None:
+    offset_jump = to_signed8(cpu.fetch_u8())
+    result, flags = add_sp_e8(cpu.registers.sp, offset_jump)
+
+    cpu.registers.apply(flags)
+
+    cpu.registers.hl = result
+
+
+def _ld_sp_hl(cpu: CPU) -> None:
+    cpu.registers.sp = cpu.registers.hl
+
+
 OPCODES: Final[dict[int, Instruction]] = {
     0x00: Instruction("NOP", 4, _nop),
     0xC3: Instruction("JP a16", 16, _jp_a16),
@@ -967,4 +1114,23 @@ OPCODES: Final[dict[int, Instruction]] = {
     0xC8: Instruction("RET Z", 8, _ret_z, 20),
     0xD0: Instruction("RET NC", 8, _ret_nc, 20),
     0xD8: Instruction("RET C", 8, _ret_c, 20),
+    0xC5: Instruction("PUSH BC", 16, _push_bc),
+    0xD5: Instruction("PUSH DE", 16, _push_de),
+    0xE5: Instruction("PUSH HL", 16, _push_hl),
+    0xF5: Instruction("PUSH AF", 16, _push_af),
+    0xC1: Instruction("POP BC", 12, _pop_bc),
+    0xD1: Instruction("POP DE", 12, _pop_de),
+    0xE1: Instruction("POP HL", 12, _pop_hl),
+    0xF1: Instruction("POP AF", 12, _pop_af),
+    0xC7: Instruction("RST 0x00", 16, _rst_00),
+    0xCF: Instruction("RST 0x08", 16, _rst_08),
+    0xD7: Instruction("RST 0x10", 16, _rst_10),
+    0xDF: Instruction("RST 0x18", 16, _rst_18),
+    0xE7: Instruction("RST 0x20", 16, _rst_20),
+    0xEF: Instruction("RST 0x28", 16, _rst_28),
+    0xF7: Instruction("RST 0x30", 16, _rst_30),
+    0xFF: Instruction("RST 0x38", 16, _rst_38),
+    0xE8: Instruction("ADD SP, e8", 16, _add_sp_e8),
+    0xF8: Instruction("LD HL, SP+e8", 12, _ld_hl_sp_e8),
+    0xF9: Instruction("LD SP, HL", 8, _ld_sp_hl),
 }

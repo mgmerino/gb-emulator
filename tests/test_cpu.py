@@ -2051,3 +2051,295 @@ def test_the_unconditional_ret_table_entry_is_named_and_costed() -> None:
     assert instruction.name == "RET"
     assert instruction.cycles == 16
     assert instruction.cycles_when_taken is None
+
+
+# --- PUSH / POP ---
+
+
+@pytest.mark.parametrize(
+    ("opcode", "pair", "value"),
+    [
+        (0xC5, "bc", 0x1234),
+        (0xD5, "de", 0x1234),
+        (0xE5, "hl", 0x1234),
+        (0xF5, "af", 0x1230),  # F has no low nibble
+    ],
+    ids=["BC", "DE", "HL", "AF"],
+)
+def test_push_writes_the_pair_below_sp(
+    cpu_running: CpuRunning, opcode: int, pair: str, value: int
+) -> None:
+    cpu = cpu_running(opcode)
+    cpu.registers.sp = 0xFFFE
+    setattr(cpu.registers, pair, value)
+
+    assert cpu.step() == 16
+    assert cpu.registers.sp == 0xFFFC
+    assert cpu.bus.read(0xFFFC) == value & 0xFF
+    assert cpu.bus.read(0xFFFD) == value >> 8
+
+
+@pytest.mark.parametrize(
+    ("opcode", "pair", "expected"),
+    [
+        (0xC1, "bc", 0x1234),
+        (0xD1, "de", 0x1234),
+        (0xE1, "hl", 0x1234),
+        (0xF1, "af", 0x1230),
+    ],
+    ids=["BC", "DE", "HL", "AF"],
+)
+def test_pop_loads_the_pair_from_the_stack(
+    cpu_running: CpuRunning, opcode: int, pair: str, expected: int
+) -> None:
+    cpu = cpu_running(opcode)
+    cpu.registers.sp = 0xFFFC
+    cpu.bus.write(0xFFFC, 0x34)
+    cpu.bus.write(0xFFFD, 0x12)
+
+    assert cpu.step() == 12
+    assert getattr(cpu.registers, pair) == expected
+    assert cpu.registers.sp == 0xFFFE
+
+
+def test_pop_af_discards_the_low_nibble_of_f(cpu_running: CpuRunning) -> None:
+    cpu = cpu_running(0xF1)
+    cpu.registers.sp = 0xFFFC
+    cpu.bus.write(0xFFFC, 0x34)
+    cpu.bus.write(0xFFFD, 0x12)
+
+    cpu.step()
+
+    assert cpu.registers.a == 0x12
+    # F's bottom four bits do not exist on the hardware.
+    assert cpu.registers.f == 0x30
+    assert cpu.registers.z_flag is False
+    assert cpu.registers.n_flag is False
+    assert cpu.registers.h_flag is True
+    assert cpu.registers.c_flag is True
+
+
+def test_push_af_then_pop_af_restores_the_flags(cpu_running: CpuRunning) -> None:
+    # F5 PUSH AF ; F1 POP AF
+    cpu = cpu_running(0xF5, 0xF1)
+    cpu.registers.sp = 0xFFFE
+    cpu.registers.a = 0x42
+    cpu.registers.z_flag = True
+    cpu.registers.n_flag = False
+    cpu.registers.h_flag = True
+    cpu.registers.c_flag = False
+
+    cpu.step()
+    cpu.step()
+
+    assert cpu.registers.a == 0x42
+    assert cpu.registers.z_flag is True
+    assert cpu.registers.n_flag is False
+    assert cpu.registers.h_flag is True
+    assert cpu.registers.c_flag is False
+    assert cpu.registers.sp == 0xFFFE
+
+
+def test_a_pair_can_be_pushed_and_popped_into_a_different_pair(
+    cpu_running: CpuRunning,
+) -> None:
+    # C5 PUSH BC ; D1 POP DE
+    cpu = cpu_running(0xC5, 0xD1)
+    cpu.registers.sp = 0xFFFE
+    cpu.registers.bc = 0xBEEF
+
+    cpu.step()
+    cpu.step()
+
+    # Nothing on the stack records which register the bytes came from.
+    assert cpu.registers.de == 0xBEEF
+    assert cpu.registers.bc == 0xBEEF
+    assert cpu.registers.sp == 0xFFFE
+
+
+@pytest.mark.parametrize(
+    ("opcode", "name", "cycles"),
+    [
+        (0xC5, "PUSH BC", 16),
+        (0xD5, "PUSH DE", 16),
+        (0xE5, "PUSH HL", 16),
+        (0xF5, "PUSH AF", 16),
+        (0xC1, "POP BC", 12),
+        (0xD1, "POP DE", 12),
+        (0xE1, "POP HL", 12),
+        (0xF1, "POP AF", 12),
+    ],
+)
+def test_the_push_pop_table_entries_are_named_and_costed(
+    opcode: int, name: str, cycles: int
+) -> None:
+    instruction = OPCODES[opcode]
+
+    assert instruction.name == name
+    # PUSH costs one cycle more than POP for the same three accesses: the
+    # 16-bit decrement of SP.
+    assert instruction.cycles == cycles
+    assert instruction.cycles_when_taken is None
+
+
+# --- RST ---
+
+
+@pytest.mark.parametrize(
+    ("opcode", "target"),
+    [
+        (0xC7, 0x0000),
+        (0xCF, 0x0008),
+        (0xD7, 0x0010),
+        (0xDF, 0x0018),
+        (0xE7, 0x0020),
+        (0xEF, 0x0028),
+        (0xF7, 0x0030),
+        (0xFF, 0x0038),
+    ],
+    ids=lambda value: f"{value:#04x}",
+)
+def test_rst_calls_its_fixed_target(
+    cpu_running: CpuRunning, opcode: int, target: int
+) -> None:
+    cpu = cpu_running(opcode)
+    cpu.registers.sp = 0xFFFE
+
+    assert cpu.step() == 16
+    assert cpu.registers.pc == target
+    assert cpu.registers.sp == 0xFFFC
+    assert cpu.bus.read16(0xFFFC) == 0x0101
+
+
+def test_rst_returns_like_a_call(cpu_running: CpuRunning) -> None:
+    # FF RST 0x38 ; (at 0x0038) C9 RET
+    cpu = cpu_running(0xFF)
+    cpu.bus.write(0x0038, 0xC9)
+    cpu.registers.sp = 0xFFFE
+
+    cpu.step()
+    cpu.step()
+
+    assert cpu.registers.pc == 0x0101
+    assert cpu.registers.sp == 0xFFFE
+
+
+def test_rst_does_not_touch_the_flags(cpu_running: CpuRunning) -> None:
+    cpu = cpu_running(0xFF)
+    cpu.registers.sp = 0xFFFE
+    cpu.registers.f = 0xF0
+
+    cpu.step()
+
+    assert cpu.registers.f == 0xF0
+
+
+@pytest.mark.parametrize(
+    ("opcode", "name"),
+    [
+        (0xC7, "RST 0x00"),
+        (0xCF, "RST 0x08"),
+        (0xD7, "RST 0x10"),
+        (0xDF, "RST 0x18"),
+        (0xE7, "RST 0x20"),
+        (0xEF, "RST 0x28"),
+        (0xF7, "RST 0x30"),
+        (0xFF, "RST 0x38"),
+    ],
+)
+def test_the_rst_table_entries_are_named_and_costed(opcode: int, name: str) -> None:
+    instruction = OPCODES[opcode]
+
+    assert instruction.name == name
+    assert instruction.cycles == 16
+    assert instruction.cycles_when_taken is None
+
+
+# --- SP arithmetic ---
+
+# sp, offset byte, result, H, C. The flags come from the unsigned low byte at
+# bits 3 and 7, while the sum itself is signed and 16-bit.
+SP_OFFSET_CASES = [
+    (0x0000, 0x01, 0x0001, False, False),
+    (0x000F, 0x01, 0x0010, True, False),
+    (0x00FF, 0x01, 0x0100, True, True),
+    (0xFFFF, 0x01, 0x0000, True, True),
+    (0x0100, 0xFF, 0x00FF, False, False),
+    (0x0002, 0xFE, 0x0000, True, True),
+]
+SP_OFFSET_IDS = [
+    "no-flags",
+    "half-carry",
+    "half-carry-and-carry",
+    "wraps-to-zero",
+    "negative-offset",
+    "negative-offset-carries",
+]
+
+
+@pytest.mark.parametrize(
+    ("sp", "offset", "result", "h", "c"), SP_OFFSET_CASES, ids=SP_OFFSET_IDS
+)
+def test_add_sp_e8_moves_sp_and_sets_the_byte_flags(
+    cpu_running: CpuRunning, sp: int, offset: int, result: int, h: bool, c: bool
+) -> None:
+    cpu = cpu_running(0xE8, offset)
+    cpu.registers.sp = sp
+    cpu.registers.f = 0xF0
+
+    assert cpu.step() == 16
+    assert cpu.registers.sp == result
+    # Z is cleared even when the result is 0x0000: it is not a result flag here.
+    assert cpu.registers.z_flag is False
+    assert cpu.registers.n_flag is False
+    assert cpu.registers.h_flag is h
+    assert cpu.registers.c_flag is c
+
+
+@pytest.mark.parametrize(
+    ("sp", "offset", "result", "h", "c"), SP_OFFSET_CASES, ids=SP_OFFSET_IDS
+)
+def test_ld_hl_sp_e8_writes_hl_and_leaves_sp_alone(
+    cpu_running: CpuRunning, sp: int, offset: int, result: int, h: bool, c: bool
+) -> None:
+    cpu = cpu_running(0xF8, offset)
+    cpu.registers.sp = sp
+    cpu.registers.f = 0xF0
+
+    assert cpu.step() == 12
+    assert cpu.registers.hl == result
+    assert cpu.registers.sp == sp
+    assert cpu.registers.z_flag is False
+    assert cpu.registers.n_flag is False
+    assert cpu.registers.h_flag is h
+    assert cpu.registers.c_flag is c
+
+
+def test_ld_sp_hl_copies_hl_without_touching_the_flags(
+    cpu_running: CpuRunning,
+) -> None:
+    cpu = cpu_running(0xF9)
+    cpu.registers.hl = 0xBEEF
+    cpu.registers.f = 0xF0
+
+    assert cpu.step() == 8
+    assert cpu.registers.sp == 0xBEEF
+    assert cpu.registers.f == 0xF0
+
+
+@pytest.mark.parametrize(
+    ("opcode", "name", "cycles"),
+    [
+        (0xE8, "ADD SP, e8", 16),
+        (0xF8, "LD HL, SP+e8", 12),
+        (0xF9, "LD SP, HL", 8),
+    ],
+)
+def test_the_sp_arithmetic_table_entries_are_named_and_costed(
+    opcode: int, name: str, cycles: int
+) -> None:
+    instruction = OPCODES[opcode]
+
+    assert instruction.name == name
+    assert instruction.cycles == cycles
+    assert instruction.cycles_when_taken is None
