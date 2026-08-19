@@ -2253,3 +2253,93 @@ def test_the_rst_table_entries_are_named_and_costed(opcode: int, name: str) -> N
     assert instruction.name == name
     assert instruction.cycles == 16
     assert instruction.cycles_when_taken is None
+
+
+# --- SP arithmetic ---
+
+# sp, offset byte, result, H, C. The flags come from the unsigned low byte at
+# bits 3 and 7, while the sum itself is signed and 16-bit.
+SP_OFFSET_CASES = [
+    (0x0000, 0x01, 0x0001, False, False),
+    (0x000F, 0x01, 0x0010, True, False),
+    (0x00FF, 0x01, 0x0100, True, True),
+    (0xFFFF, 0x01, 0x0000, True, True),
+    (0x0100, 0xFF, 0x00FF, False, False),
+    (0x0002, 0xFE, 0x0000, True, True),
+]
+SP_OFFSET_IDS = [
+    "no-flags",
+    "half-carry",
+    "half-carry-and-carry",
+    "wraps-to-zero",
+    "negative-offset",
+    "negative-offset-carries",
+]
+
+
+@pytest.mark.parametrize(
+    ("sp", "offset", "result", "h", "c"), SP_OFFSET_CASES, ids=SP_OFFSET_IDS
+)
+def test_add_sp_e8_moves_sp_and_sets_the_byte_flags(
+    cpu_running: CpuRunning, sp: int, offset: int, result: int, h: bool, c: bool
+) -> None:
+    cpu = cpu_running(0xE8, offset)
+    cpu.registers.sp = sp
+    cpu.registers.f = 0xF0
+
+    assert cpu.step() == 16
+    assert cpu.registers.sp == result
+    # Z is cleared even when the result is 0x0000: it is not a result flag here.
+    assert cpu.registers.z_flag is False
+    assert cpu.registers.n_flag is False
+    assert cpu.registers.h_flag is h
+    assert cpu.registers.c_flag is c
+
+
+@pytest.mark.parametrize(
+    ("sp", "offset", "result", "h", "c"), SP_OFFSET_CASES, ids=SP_OFFSET_IDS
+)
+def test_ld_hl_sp_e8_writes_hl_and_leaves_sp_alone(
+    cpu_running: CpuRunning, sp: int, offset: int, result: int, h: bool, c: bool
+) -> None:
+    cpu = cpu_running(0xF8, offset)
+    cpu.registers.sp = sp
+    cpu.registers.f = 0xF0
+
+    assert cpu.step() == 12
+    assert cpu.registers.hl == result
+    assert cpu.registers.sp == sp
+    assert cpu.registers.z_flag is False
+    assert cpu.registers.n_flag is False
+    assert cpu.registers.h_flag is h
+    assert cpu.registers.c_flag is c
+
+
+def test_ld_sp_hl_copies_hl_without_touching_the_flags(
+    cpu_running: CpuRunning,
+) -> None:
+    cpu = cpu_running(0xF9)
+    cpu.registers.hl = 0xBEEF
+    cpu.registers.f = 0xF0
+
+    assert cpu.step() == 8
+    assert cpu.registers.sp == 0xBEEF
+    assert cpu.registers.f == 0xF0
+
+
+@pytest.mark.parametrize(
+    ("opcode", "name", "cycles"),
+    [
+        (0xE8, "ADD SP, e8", 16),
+        (0xF8, "LD HL, SP+e8", 12),
+        (0xF9, "LD SP, HL", 8),
+    ],
+)
+def test_the_sp_arithmetic_table_entries_are_named_and_costed(
+    opcode: int, name: str, cycles: int
+) -> None:
+    instruction = OPCODES[opcode]
+
+    assert instruction.name == name
+    assert instruction.cycles == cycles
+    assert instruction.cycles_when_taken is None

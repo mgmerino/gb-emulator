@@ -15,7 +15,21 @@ from dataclasses import dataclass
 from enum import IntEnum
 from typing import Final, Self
 
-from gameboy.alu import Flags, adc, add, add16, and_, daa, dec, inc, or_, sbc, sub, xor
+from gameboy.alu import (
+    Flags,
+    adc,
+    add,
+    add16,
+    add_sp_e8,
+    and_,
+    daa,
+    dec,
+    inc,
+    or_,
+    sbc,
+    sub,
+    xor,
+)
 from gameboy.bits import get_bit, high_byte, join_bytes, low_byte, to_signed8, u8, u16
 from gameboy.memory import MemoryDevice
 
@@ -1026,6 +1040,28 @@ def _rst_38(cpu: CPU) -> None:
     cpu.registers.pc = 0x38
 
 
+def _add_sp_e8(cpu: CPU) -> None:
+    offset_jump = to_signed8(cpu.fetch_u8())
+    result, flags = add_sp_e8(cpu.registers.sp, offset_jump)
+
+    cpu.registers.apply(flags)
+
+    cpu.registers.sp = result
+
+
+def _ld_hl_sp_e8(cpu: CPU) -> None:
+    offset_jump = to_signed8(cpu.fetch_u8())
+    result, flags = add_sp_e8(cpu.registers.sp, offset_jump)
+
+    cpu.registers.apply(flags)
+
+    cpu.registers.hl = result
+
+
+def _ld_sp_hl(cpu: CPU) -> None:
+    cpu.registers.sp = cpu.registers.hl
+
+
 OPCODES: Final[dict[int, Instruction]] = {
     0x00: Instruction("NOP", 4, _nop),
     0xC3: Instruction("JP a16", 16, _jp_a16),
@@ -1094,4 +1130,7 @@ OPCODES: Final[dict[int, Instruction]] = {
     0xEF: Instruction("RST 0x28", 16, _rst_28),
     0xF7: Instruction("RST 0x30", 16, _rst_30),
     0xFF: Instruction("RST 0x38", 16, _rst_38),
+    0xE8: Instruction("ADD SP, e8", 16, _add_sp_e8),
+    0xF8: Instruction("LD HL, SP+e8", 12, _ld_hl_sp_e8),
+    0xF9: Instruction("LD SP, HL", 8, _ld_sp_hl),
 }
