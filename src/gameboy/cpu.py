@@ -310,6 +310,25 @@ def write_pair(cpu: CPU, pair: RegisterPair, value: int) -> None:
             cpu.registers.sp = value
 
 
+class Condition(IntEnum):
+    NZ = 0b00
+    Z = 0b01
+    NC = 0b10
+    C = 0b11
+
+
+def condition_met(cpu: CPU, condition: Condition) -> bool:
+    match condition:
+        case Condition.Z:
+            return cpu.registers.z_flag
+        case Condition.NZ:
+            return not cpu.registers.z_flag
+        case Condition.C:
+            return cpu.registers.c_flag
+        case Condition.NC:
+            return not cpu.registers.c_flag
+
+
 T_CYCLES_PER_ACCESS = 4
 
 
