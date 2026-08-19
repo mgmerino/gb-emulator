@@ -986,6 +986,46 @@ def _pop_af(cpu: CPU) -> None:
     write_stack_pair(cpu, StackPair.AF, value)
 
 
+def _rst_00(cpu: CPU) -> None:
+    cpu.push16(cpu.registers.pc)
+    cpu.registers.pc = 0x00
+
+
+def _rst_10(cpu: CPU) -> None:
+    cpu.push16(cpu.registers.pc)
+    cpu.registers.pc = 0x10
+
+
+def _rst_08(cpu: CPU) -> None:
+    cpu.push16(cpu.registers.pc)
+    cpu.registers.pc = 0x08
+
+
+def _rst_18(cpu: CPU) -> None:
+    cpu.push16(cpu.registers.pc)
+    cpu.registers.pc = 0x18
+
+
+def _rst_20(cpu: CPU) -> None:
+    cpu.push16(cpu.registers.pc)
+    cpu.registers.pc = 0x20
+
+
+def _rst_28(cpu: CPU) -> None:
+    cpu.push16(cpu.registers.pc)
+    cpu.registers.pc = 0x28
+
+
+def _rst_30(cpu: CPU) -> None:
+    cpu.push16(cpu.registers.pc)
+    cpu.registers.pc = 0x30
+
+
+def _rst_38(cpu: CPU) -> None:
+    cpu.push16(cpu.registers.pc)
+    cpu.registers.pc = 0x38
+
+
 OPCODES: Final[dict[int, Instruction]] = {
     0x00: Instruction("NOP", 4, _nop),
     0xC3: Instruction("JP a16", 16, _jp_a16),
@@ -1046,4 +1086,12 @@ OPCODES: Final[dict[int, Instruction]] = {
     0xD1: Instruction("POP DE", 12, _pop_de),
     0xE1: Instruction("POP HL", 12, _pop_hl),
     0xF1: Instruction("POP AF", 12, _pop_af),
+    0xC7: Instruction("RST 0x00", 16, _rst_00),
+    0xCF: Instruction("RST 0x08", 16, _rst_08),
+    0xD7: Instruction("RST 0x10", 16, _rst_10),
+    0xDF: Instruction("RST 0x18", 16, _rst_18),
+    0xE7: Instruction("RST 0x20", 16, _rst_20),
+    0xEF: Instruction("RST 0x28", 16, _rst_28),
+    0xF7: Instruction("RST 0x30", 16, _rst_30),
+    0xFF: Instruction("RST 0x38", 16, _rst_38),
 }

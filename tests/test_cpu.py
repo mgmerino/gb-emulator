@@ -2180,3 +2180,76 @@ def test_the_push_pop_table_entries_are_named_and_costed(
     # 16-bit decrement of SP.
     assert instruction.cycles == cycles
     assert instruction.cycles_when_taken is None
+
+
+# --- RST ---
+
+
+@pytest.mark.parametrize(
+    ("opcode", "target"),
+    [
+        (0xC7, 0x0000),
+        (0xCF, 0x0008),
+        (0xD7, 0x0010),
+        (0xDF, 0x0018),
+        (0xE7, 0x0020),
+        (0xEF, 0x0028),
+        (0xF7, 0x0030),
+        (0xFF, 0x0038),
+    ],
+    ids=lambda value: f"{value:#04x}",
+)
+def test_rst_calls_its_fixed_target(
+    cpu_running: CpuRunning, opcode: int, target: int
+) -> None:
+    cpu = cpu_running(opcode)
+    cpu.registers.sp = 0xFFFE
+
+    assert cpu.step() == 16
+    assert cpu.registers.pc == target
+    assert cpu.registers.sp == 0xFFFC
+    assert cpu.bus.read16(0xFFFC) == 0x0101
+
+
+def test_rst_returns_like_a_call(cpu_running: CpuRunning) -> None:
+    # FF RST 0x38 ; (at 0x0038) C9 RET
+    cpu = cpu_running(0xFF)
+    cpu.bus.write(0x0038, 0xC9)
+    cpu.registers.sp = 0xFFFE
+
+    cpu.step()
+    cpu.step()
+
+    assert cpu.registers.pc == 0x0101
+    assert cpu.registers.sp == 0xFFFE
+
+
+def test_rst_does_not_touch_the_flags(cpu_running: CpuRunning) -> None:
+    cpu = cpu_running(0xFF)
+    cpu.registers.sp = 0xFFFE
+    cpu.registers.f = 0xF0
+
+    cpu.step()
+
+    assert cpu.registers.f == 0xF0
+
+
+@pytest.mark.parametrize(
+    ("opcode", "name"),
+    [
+        (0xC7, "RST 0x00"),
+        (0xCF, "RST 0x08"),
+        (0xD7, "RST 0x10"),
+        (0xDF, "RST 0x18"),
+        (0xE7, "RST 0x20"),
+        (0xEF, "RST 0x28"),
+        (0xF7, "RST 0x30"),
+        (0xFF, "RST 0x38"),
+    ],
+)
+def test_the_rst_table_entries_are_named_and_costed(opcode: int, name: str) -> None:
+    instruction = OPCODES[opcode]
+
+    assert instruction.name == name
+    assert instruction.cycles == 16
+    assert instruction.cycles_when_taken is None
