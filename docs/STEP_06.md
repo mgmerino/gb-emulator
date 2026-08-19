@@ -117,7 +117,7 @@ instruction body runs — by the time a `JR` body has fetched its operand, `PC`
 already holds that address. So the body is:
 
 ```
-offset = s8(fetch_u8())
+offset = to_signed8(fetch_u8())
 PC = u16(PC + offset)
 ```
 
@@ -140,16 +140,15 @@ int.from_bytes(bytes([value]), signed=True)   # stdlib, honest about what it is
 struct.unpack("b", bytes([value]))[0]         # the C-ish one
 ```
 
-Take the first, in a `bits.s8` next to `u8` and `u16`. It is one expression, it
-needs no allocation, and `bits.py` is the module whose entire job is "what does
-this byte mean". Ruby's equivalent is `[value].pack("C").unpack1("c")`, which is
-worse than all three.
+You already took the first, back in Step 01: `bits.to_signed8`. It is one
+expression, it needs no allocation, and `bits.py` is the module whose entire job
+is "what does this byte mean". Ruby's equivalent is
+`[value].pack("C").unpack1("c")`, which is worse than all three.
 
-Note the asymmetry in `bits.py` after this: `u8` and `u16` answer "how does this
-value fit in n bits", `s8` answers "how is this byte to be read". Both are width
-questions, so both belong there — but if you would rather name it
-`to_signed_byte`, do; the point is that no instruction body should contain
-`- 0x100`.
+Note the asymmetry in `bits.py`: `u8` and `u16` answer "how does this value fit
+in n bits", `to_signed8` answers "how is this byte to be read". Both are width
+questions, so both belong there. What matters is that no instruction body
+contains `- 0x100`.
 
 ### 4. Conditions are a two-bit field, and four families share it
 
@@ -435,7 +434,7 @@ an assertion and an unbounded one hangs CI in Step 10.
 | Concept | Why here | Ruby analogue |
 | --- | --- | --- |
 | Return-type covariance in `Callable` | `-> None` bodies satisfy `-> bool \| None` | duck typing, unchecked |
-| Two's complement conversion | `s8` for `JR` offsets | `pack`/`unpack` |
+| Two's complement conversion | `to_signed8` for `JR` offsets | `pack`/`unpack` |
 | A second `IntEnum` over the same bit field | `StackPair` vs `RegisterPair` | two frozen hashes |
 | Dataclass field defaults and ordering | adding `cycles_when_taken` without touching 180 entries | keyword args with defaults |
 | Bounded iteration in tests | `for _ in range(n)` over `while` | same, but nobody enforces it |
@@ -444,15 +443,24 @@ an assertion and an unbounded one hangs CI in Step 10.
 
 ## Tasks
 
-### 1. `bits.s8`
+### 1. `bits.to_signed8` — already done in Step 01
 
-One function, two tests worth writing: `s8(0x00) == 0`, `s8(0x7F) == 127`,
-`s8(0x80) == -128`, `s8(0xFF) == -1`, `s8(0xFC) == -4`.
+`to_signed8` exists and its four boundary cases are already covered:
+`0x00 -> 0`, `0x7F -> 127`, `0x80 -> -128`, `0xFF -> -1`. Nothing to write.
 
-Then one property worth asserting once, because it is the thing that makes `JR`
-work without special cases: `u16(0x0218 + s8(0xFC)) == 0x0214`.
+Two additions worth the two lines, both about `JR` rather than about the
+function:
 
-**Acceptance:** `bits.py` still imports nothing.
+- `to_signed8(0xFC) == -4`. The four existing cases prove the sign boundary; this
+  one is the value you will actually meet, in the Tetris loop and in most
+  backward jumps.
+- The property that makes `JR` need no correction term:
+  `u16(0x0218 + to_signed8(0xFC)) == 0x0214`. Assert it once. It is the claim
+  every jump in this step rests on, and it is the only place in the suite where
+  `bits` and the jump arithmetic are checked together.
+
+**Acceptance:** `bits.py` still imports nothing. (It does. Step 01 got this
+right and nothing since has been tempted to break it.)
 
 ---
 
