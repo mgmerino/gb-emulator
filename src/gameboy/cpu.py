@@ -163,7 +163,8 @@ class UnknownOpcodeError(Exception):
 class Instruction:
     name: str
     cycles: int
-    execute: Callable[["CPU"], None]
+    execute: Callable[["CPU"], bool | None]
+    cycles_when_taken: int | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -204,7 +205,9 @@ class CPU:
         if instruction is None:
             raise UnknownOpcodeError(opcode, u16(self.registers.pc - 1))
 
-        instruction.execute(self)
+        taken = instruction.execute(self)
+        if taken and instruction.cycles_when_taken is not None:
+            return instruction.cycles_when_taken
 
         return instruction.cycles
 
