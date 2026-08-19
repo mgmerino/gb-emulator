@@ -249,6 +249,55 @@ def test_fetch_wraps_at_the_top_of_memory(cpu_running: CpuRunning) -> None:
     assert cpu.registers.pc == 0x0000
 
 
+# --- THE STACK ---
+
+
+def test_push_moves_sp_down_two_and_writes_the_low_byte_first(
+    cpu_running: CpuRunning,
+) -> None:
+    cpu = cpu_running()
+    cpu.registers.sp = 0xFFFE
+
+    cpu.push16(0x1234)
+
+    assert cpu.registers.sp == 0xFFFC
+    assert cpu.bus.read(0xFFFC) == 0x34
+    assert cpu.bus.read(0xFFFD) == 0x12
+
+
+def test_push_then_pop_returns_the_value_and_restores_sp(
+    cpu_running: CpuRunning,
+) -> None:
+    cpu = cpu_running()
+    cpu.registers.sp = 0xFFFE
+
+    cpu.push16(0x1234)
+
+    assert cpu.pop16() == 0x1234
+    assert cpu.registers.sp == 0xFFFE
+
+
+def test_the_stack_pops_in_reverse_order(cpu_running: CpuRunning) -> None:
+    cpu = cpu_running()
+    cpu.registers.sp = 0xFFFE
+
+    cpu.push16(0xAABB)
+    cpu.push16(0xCCDD)
+
+    assert cpu.pop16() == 0xCCDD
+    assert cpu.pop16() == 0xAABB
+    assert cpu.registers.sp == 0xFFFE
+
+
+def test_sp_wraps_at_sixteen_bits(cpu_running: CpuRunning) -> None:
+    cpu = cpu_running()
+    cpu.registers.sp = 0x0000
+
+    cpu.push16(0x1234)
+
+    assert cpu.registers.sp == 0xFFFE
+
+
 def test_nop_advances_pc_by_one_and_costs_four_cycles(cpu_running: CpuRunning) -> None:
     cpu = cpu_running(0x00)
 
@@ -1541,3 +1590,464 @@ def test_daa_corrects_a_bcd_program(
     assert cpu.registers.a == expected_a
     assert cpu.registers.f == expected_f
     assert cpu.registers.pc == 0x0105  # 2 + 2 + 1 bytes
+
+
+# --- JR ---
+
+
+def test_jr_jumps_forward_relative_to_the_next_instruction(
+    cpu_running: CpuRunning,
+) -> None:
+    cpu = cpu_running(0x18, 0x05)
+
+    assert cpu.step() == 12
+    # After both bytes are fetched PC is 0x0102, and the offset counts from
+    # there: 0x0102 + 5.
+    assert cpu.registers.pc == 0x0107
+
+
+def test_jr_jumps_backward_on_a_negative_offset(cpu_running: CpuRunning) -> None:
+    cpu = cpu_running(0x18, 0xFC, at=0x0216)
+
+    assert cpu.step() == 12
+    # 0xFC is -4 as a signed byte. PC is 0x0218 after the fetch, so 0x0214.
+    assert cpu.registers.pc == 0x0214
+
+
+@pytest.mark.parametrize(
+    ("opcode", "z", "c", "expected_pc", "expected_cycles"),
+    [
+        (0x20, False, False, 0x0107, 12),  # JR NZ, Z clear -> taken
+        (0x20, True, False, 0x0102, 8),  # JR NZ, Z set     -> not taken
+        (0x28, True, False, 0x0107, 12),  # JR Z,  Z set    -> taken
+        (0x28, False, False, 0x0102, 8),  # JR Z,  Z clear  -> not taken
+        (0x30, False, False, 0x0107, 12),  # JR NC, C clear -> taken
+        (0x30, False, True, 0x0102, 8),  # JR NC, C set     -> not taken
+        (0x38, False, True, 0x0107, 12),  # JR C,  C set    -> taken
+        (0x38, False, False, 0x0102, 8),  # JR C,  C clear  -> not taken
+    ],
+    ids=[
+        "NZ-taken",
+        "NZ-skipped",
+        "Z-taken",
+        "Z-skipped",
+        "NC-taken",
+        "NC-skipped",
+        "C-taken",
+        "C-skipped",
+    ],
+)
+def test_conditional_jr_branches_only_when_its_condition_holds(
+    cpu_running: CpuRunning,
+    opcode: int,
+    z: bool,
+    c: bool,
+    expected_pc: int,
+    expected_cycles: int,
+) -> None:
+    cpu = cpu_running(opcode, 0x05)
+    cpu.registers.z_flag = z
+    cpu.registers.c_flag = c
+
+    assert cpu.step() == expected_cycles
+    assert cpu.registers.pc == expected_pc
+
+
+def test_jr_does_not_touch_the_flags(cpu_running: CpuRunning) -> None:
+    cpu = cpu_running(0x18, 0x05)
+    cpu.registers.z_flag = True
+    cpu.registers.c_flag = True
+    cpu.registers.n_flag = True
+    cpu.registers.h_flag = True
+
+    cpu.step()
+
+    assert cpu.registers.f == 0xF0
+
+
+def test_jr_nz_runs_a_loop_to_completion(cpu_running: CpuRunning) -> None:
+    # 0100  06 03   LD B, 3
+    # 0102  05      DEC B
+    # 0103  20 FD   JR NZ, -3   -> back to 0102 while B is not zero
+    # 0105  00      NOP
+    cpu = cpu_running(0x06, 0x03, 0x05, 0x20, 0xFD, 0x00)
+
+    for _ in range(7):
+        cpu.step()
+
+    assert cpu.registers.b == 0x00
+    assert cpu.registers.pc == 0x0105
+
+
+@pytest.mark.parametrize(
+    ("opcode", "name"),
+    [
+        (0x18, "JR e8"),
+        (0x20, "JR NZ, e8"),
+        (0x28, "JR Z, e8"),
+        (0x30, "JR NC, e8"),
+        (0x38, "JR C, e8"),
+    ],
+)
+def test_the_jr_table_entries_are_named_and_costed(opcode: int, name: str) -> None:
+    instruction = OPCODES[opcode]
+
+    assert instruction.name == name
+    if opcode == 0x18:
+        assert instruction.cycles == 12
+        assert instruction.cycles_when_taken is None
+    else:
+        assert instruction.cycles == 8
+        assert instruction.cycles_when_taken == 12
+
+
+@pytest.mark.parametrize(
+    ("opcode", "z", "c"),
+    [
+        (0x18, False, False),  # JR e8,     always taken
+        (0x20, False, False),  # JR NZ, e8, Z clear -> taken
+        (0x28, True, False),  # JR Z, e8,  Z set    -> taken
+        (0x30, False, False),  # JR NC, e8, C clear -> taken
+        (0x38, False, True),  # JR C, e8,  C set    -> taken
+    ],
+    ids=["JR", "JR NZ", "JR Z", "JR NC", "JR C"],
+)
+def test_a_taken_jr_wraps_pc_at_the_bottom_of_memory(
+    cpu_running: CpuRunning, opcode: int, z: bool, c: bool
+) -> None:
+    cpu = cpu_running(opcode, 0xFC, at=0x0000)
+    cpu.registers.z_flag = z
+    cpu.registers.c_flag = c
+
+    cpu.step()
+
+    assert cpu.registers.pc == 0xFFFE
+
+
+# --- JP cc ---
+
+
+@pytest.mark.parametrize(
+    ("opcode", "z", "c", "expected_pc", "expected_cycles"),
+    [
+        (0xC2, False, False, 0x0150, 16),  # JP NZ, Z clear -> taken
+        (0xC2, True, False, 0x0103, 12),  # JP NZ, Z set    -> not taken
+        (0xCA, True, False, 0x0150, 16),  # JP Z,  Z set    -> taken
+        (0xCA, False, False, 0x0103, 12),  # JP Z,  Z clear -> not taken
+        (0xD2, False, False, 0x0150, 16),  # JP NC, C clear -> taken
+        (0xD2, False, True, 0x0103, 12),  # JP NC, C set    -> not taken
+        (0xDA, False, True, 0x0150, 16),  # JP C,  C set    -> taken
+        (0xDA, False, False, 0x0103, 12),  # JP C,  C clear -> not taken
+    ],
+    ids=[
+        "NZ-taken",
+        "NZ-skipped",
+        "Z-taken",
+        "Z-skipped",
+        "NC-taken",
+        "NC-skipped",
+        "C-taken",
+        "C-skipped",
+    ],
+)
+def test_conditional_jp_branches_only_when_its_condition_holds(
+    cpu_running: CpuRunning,
+    opcode: int,
+    z: bool,
+    c: bool,
+    expected_pc: int,
+    expected_cycles: int,
+) -> None:
+    cpu = cpu_running(opcode, 0x50, 0x01)
+    cpu.registers.z_flag = z
+    cpu.registers.c_flag = c
+
+    assert cpu.step() == expected_cycles
+    assert cpu.registers.pc == expected_pc
+
+
+@pytest.mark.parametrize(
+    ("opcode", "name"),
+    [
+        (0xC3, "JP a16"),
+        (0xC2, "JP NZ, a16"),
+        (0xCA, "JP Z, a16"),
+        (0xD2, "JP NC, a16"),
+        (0xDA, "JP C, a16"),
+    ],
+)
+def test_the_jp_table_entries_are_named_and_costed(opcode: int, name: str) -> None:
+    instruction = OPCODES[opcode]
+
+    assert instruction.name == name
+    if opcode == 0xC3:
+        assert instruction.cycles == 16
+        assert instruction.cycles_when_taken is None
+    else:
+        assert instruction.cycles == 12
+        assert instruction.cycles_when_taken == 16
+
+
+# --- JP HL ---
+
+
+def test_jp_hl_jumps_to_the_value_of_hl_without_reading_memory(
+    cpu_running: CpuRunning,
+) -> None:
+    cpu = cpu_running(0xE9)
+    cpu.registers.hl = 0x4000
+    cpu.bus.write(0x4000, 0x99)
+
+    assert cpu.step() == 4
+    assert cpu.registers.pc == 0x4000
+
+
+def test_the_jp_hl_table_entry_is_named_and_costed() -> None:
+    instruction = OPCODES[0xE9]
+
+    assert instruction.name == "JP HL"
+    assert instruction.cycles == 4
+    # Unconditional: there is no taken/not-taken pair to declare.
+    assert instruction.cycles_when_taken is None
+
+
+# --- CALL ---
+
+
+def test_call_pushes_the_return_address_and_jumps(cpu_running: CpuRunning) -> None:
+    # 0100  CD 10 01   CALL 0x0110
+    # 0103             <- the return address, the instruction after the CALL
+    cpu = cpu_running(0xCD, 0x10, 0x01)
+    cpu.registers.sp = 0xFFFE
+
+    assert cpu.step() == 24
+    assert cpu.registers.pc == 0x0110
+    assert cpu.registers.sp == 0xFFFC
+    # This is the assertion that pins *which* address:
+    # 0x0103, not 0x0100 (the CALL itself) and not 0x0102 (one byte less)
+    assert cpu.bus.read16(0xFFFC) == 0x0103
+
+
+def test_nested_calls_stack_their_return_addresses(cpu_running: CpuRunning) -> None:
+    # 0100  CD 10 01   CALL 0x0110
+    # 0110  CD 20 01   CALL 0x0120
+    cpu = cpu_running(0xCD, 0x10, 0x01)
+    cpu.registers.sp = 0xFFFE
+    for offset, byte in enumerate((0xCD, 0x20, 0x01)):
+        cpu.bus.write(0x0110 + offset, byte)
+
+    cpu.step()
+    cpu.step()
+
+    assert cpu.registers.pc == 0x0120
+    assert cpu.registers.sp == 0xFFFA
+    assert cpu.bus.read16(0xFFFA) == 0x0113
+    assert cpu.bus.read16(0xFFFC) == 0x0103
+
+
+def test_call_does_not_touch_the_flags(cpu_running: CpuRunning) -> None:
+    cpu = cpu_running(0xCD, 0x10, 0x01)
+    cpu.registers.sp = 0xFFFE
+    cpu.registers.f = 0xF0
+
+    cpu.step()
+
+    assert cpu.registers.f == 0xF0
+
+
+def test_the_call_table_entry_is_named_and_costed() -> None:
+    instruction = OPCODES[0xCD]
+
+    assert instruction.name == "CALL a16"
+    assert instruction.cycles == 24
+    assert instruction.cycles_when_taken is None
+
+
+# --- CALL cc ---
+
+
+@pytest.mark.parametrize(
+    ("opcode", "z", "c", "taken"),
+    [
+        (0xC4, False, False, True),  # CALL NZ, Z clear  -> taken
+        (0xC4, True, False, False),  # CALL NZ, Z set    -> not taken
+        (0xCC, True, False, True),  # CALL Z,  Z set     -> taken
+        (0xCC, False, False, False),  # CALL Z,  Z clear -> not taken
+        (0xD4, False, False, True),  # CALL NC, C clear  -> taken
+        (0xD4, False, True, False),  # CALL NC, C set    -> not taken
+        (0xDC, False, True, True),  # CALL C,  C set     -> taken
+        (0xDC, False, False, False),  # CALL C,  C clear -> not taken
+    ],
+    ids=[
+        "NZ-taken",
+        "NZ-skipped",
+        "Z-taken",
+        "Z-skipped",
+        "NC-taken",
+        "NC-skipped",
+        "C-taken",
+        "C-skipped",
+    ],
+)
+def test_conditional_call_pushes_and_jumps_only_when_taken(
+    cpu_running: CpuRunning, opcode: int, z: bool, c: bool, taken: bool
+) -> None:
+    cpu = cpu_running(opcode, 0x10, 0x01)
+    cpu.registers.sp = 0xFFFE
+    cpu.registers.z_flag = z
+    cpu.registers.c_flag = c
+
+    cycles = cpu.step()
+
+    if taken:
+        assert cycles == 24
+        assert cpu.registers.pc == 0x0110
+        assert cpu.registers.sp == 0xFFFC
+        assert cpu.bus.read16(0xFFFC) == 0x0103
+    else:
+        assert cycles == 12
+        assert cpu.registers.pc == 0x0103
+        assert cpu.registers.sp == 0xFFFE
+
+
+@pytest.mark.parametrize(
+    ("opcode", "name"),
+    [
+        (0xC4, "CALL NZ, a16"),
+        (0xCC, "CALL Z, a16"),
+        (0xD4, "CALL NC, a16"),
+        (0xDC, "CALL C, a16"),
+    ],
+)
+def test_the_conditional_call_table_entries_are_named_and_costed(
+    opcode: int, name: str
+) -> None:
+    instruction = OPCODES[opcode]
+
+    assert instruction.name == name
+    assert instruction.cycles == 12
+    assert instruction.cycles_when_taken == 24
+
+
+# --- RET ---
+
+
+def test_ret_pops_the_return_address_into_pc(cpu_running: CpuRunning) -> None:
+    cpu = cpu_running(0xC9)
+    cpu.registers.sp = 0xFFFC
+    # Seeded a byte at a time rather than with write16, so this test states
+    # the little-endian claim RET depends on.
+    cpu.bus.write(0xFFFC, 0x50)
+    cpu.bus.write(0xFFFD, 0x01)
+
+    assert cpu.step() == 16
+    assert cpu.registers.pc == 0x0150
+    assert cpu.registers.sp == 0xFFFE
+
+
+def test_call_and_ret_leave_sp_where_they_found_it(cpu_running: CpuRunning) -> None:
+    # 0100  CD 10 01   CALL 0x0110
+    # 0110  C9         RET
+    cpu = cpu_running(0xCD, 0x10, 0x01)
+    cpu.bus.write(0x0110, 0xC9)
+    cpu.registers.sp = 0xFFFE
+
+    cpu.step()
+    cpu.step()
+
+    assert cpu.registers.pc == 0x0103
+    # The assertion worth making after every program test from here on: a
+    # balanced program ends with SP exactly where it started.
+    assert cpu.registers.sp == 0xFFFE
+
+
+def test_two_levels_of_call_and_ret_unwind_in_order(cpu_running: CpuRunning) -> None:
+    # 0100  CD 10 01   CALL 0x0110
+    # 0110  CD 20 01   CALL 0x0120
+    # 0113  C9         RET          -> back to 0103
+    # 0120  C9         RET          -> back to 0113
+    cpu = cpu_running(0xCD, 0x10, 0x01)
+    for address, byte in (
+        (0x0110, 0xCD),
+        (0x0111, 0x20),
+        (0x0112, 0x01),
+        (0x0113, 0xC9),
+        (0x0120, 0xC9),
+    ):
+        cpu.bus.write(address, byte)
+    cpu.registers.sp = 0xFFFE
+
+    for _ in range(4):
+        cpu.step()
+
+    assert cpu.registers.pc == 0x0103
+    assert cpu.registers.sp == 0xFFFE
+
+
+@pytest.mark.parametrize(
+    ("opcode", "z", "c", "taken"),
+    [
+        (0xC0, False, False, True),  # RET NZ, Z clear  -> taken
+        (0xC0, True, False, False),  # RET NZ, Z set    -> not taken
+        (0xC8, True, False, True),  # RET Z,  Z set     -> taken
+        (0xC8, False, False, False),  # RET Z,  Z clear -> not taken
+        (0xD0, False, False, True),  # RET NC, C clear  -> taken
+        (0xD0, False, True, False),  # RET NC, C set    -> not taken
+        (0xD8, False, True, True),  # RET C,  C set     -> taken
+        (0xD8, False, False, False),  # RET C,  C clear -> not taken
+    ],
+    ids=[
+        "NZ-taken",
+        "NZ-skipped",
+        "Z-taken",
+        "Z-skipped",
+        "NC-taken",
+        "NC-skipped",
+        "C-taken",
+        "C-skipped",
+    ],
+)
+def test_conditional_ret_pops_only_when_taken(
+    cpu_running: CpuRunning, opcode: int, z: bool, c: bool, taken: bool
+) -> None:
+    cpu = cpu_running(opcode)
+    cpu.registers.sp = 0xFFFC
+    cpu.bus.write16(0xFFFC, 0x0150)
+    cpu.registers.z_flag = z
+    cpu.registers.c_flag = c
+
+    cycles = cpu.step()
+
+    if taken:
+        assert cycles == 20
+        assert cpu.registers.pc == 0x0150
+        assert cpu.registers.sp == 0xFFFE
+    else:
+        assert cycles == 8
+        assert cpu.registers.pc == 0x0101
+        assert cpu.registers.sp == 0xFFFC
+
+
+@pytest.mark.parametrize(
+    ("opcode", "name"),
+    [
+        (0xC0, "RET NZ"),
+        (0xC8, "RET Z"),
+        (0xD0, "RET NC"),
+        (0xD8, "RET C"),
+    ],
+)
+def test_the_ret_table_entries_are_named_and_costed(opcode: int, name: str) -> None:
+    instruction = OPCODES[opcode]
+
+    assert instruction.name == name
+    assert instruction.cycles == 8
+    assert instruction.cycles_when_taken == 20
+
+
+def test_the_unconditional_ret_table_entry_is_named_and_costed() -> None:
+    instruction = OPCODES[0xC9]
+
+    assert instruction.name == "RET"
+    assert instruction.cycles == 16
+    assert instruction.cycles_when_taken is None

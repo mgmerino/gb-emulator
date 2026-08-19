@@ -16,7 +16,7 @@ from enum import IntEnum
 from typing import Final, Self
 
 from gameboy.alu import Flags, adc, add, add16, and_, daa, dec, inc, or_, sbc, sub, xor
-from gameboy.bits import get_bit, high_byte, join_bytes, low_byte, u8, u16
+from gameboy.bits import get_bit, high_byte, join_bytes, low_byte, to_signed8, u8, u16
 from gameboy.memory import MemoryDevice
 
 # Since masking is _expected_ to be executed from the top layer, we want to ensure
@@ -163,7 +163,8 @@ class UnknownOpcodeError(Exception):
 class Instruction:
     name: str
     cycles: int
-    execute: Callable[["CPU"], None]
+    execute: Callable[["CPU"], bool | None]
+    cycles_when_taken: int | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -204,9 +205,21 @@ class CPU:
         if instruction is None:
             raise UnknownOpcodeError(opcode, u16(self.registers.pc - 1))
 
-        instruction.execute(self)
+        taken = instruction.execute(self)
+        if taken and instruction.cycles_when_taken is not None:
+            return instruction.cycles_when_taken
 
         return instruction.cycles
+
+    def push16(self, value: int) -> None:
+        self.registers.sp = u16(self.registers.sp - 2)
+        self.bus.write16(self.registers.sp, value)
+
+    def pop16(self) -> int:
+        value = self.bus.read16(self.registers.sp)
+        self.registers.sp = u16(self.registers.sp + 2)
+
+        return value
 
 
 class Operand(IntEnum):
@@ -298,6 +311,25 @@ def write_pair(cpu: CPU, pair: RegisterPair, value: int) -> None:
             cpu.registers.hl = value
         case RegisterPair.SP:
             cpu.registers.sp = value
+
+
+class Condition(IntEnum):
+    NZ = 0b00
+    Z = 0b01
+    NC = 0b10
+    C = 0b11
+
+
+def condition_met(cpu: CPU, condition: Condition) -> bool:
+    match condition:
+        case Condition.Z:
+            return cpu.registers.z_flag
+        case Condition.NZ:
+            return not cpu.registers.z_flag
+        case Condition.C:
+            return cpu.registers.c_flag
+        case Condition.NC:
+            return not cpu.registers.c_flag
 
 
 T_CYCLES_PER_ACCESS = 4
@@ -686,6 +718,7 @@ def _pair_block() -> dict[int, Instruction]:
 # | 0x37   | SCF      | set carry           | -         | 0 | 0 | 1         |
 # | 0x3F   | CCF      | flip carry          | -         | 0 | 0 | inverted  |
 
+
 def _daa(cpu: CPU) -> None:
     result, flags = daa(
         cpu.registers.a,
@@ -699,7 +732,7 @@ def _daa(cpu: CPU) -> None:
 
 def _cpl(cpu: CPU) -> None:
     cpu.registers.apply(Flags(n=True, h=True))
-    cpu.registers.a = u8(~cpu.registers.a) # notice the mask to wrap on < 0
+    cpu.registers.a = u8(~cpu.registers.a)  # notice the mask to wrap on < 0
 
 
 def _scf(cpu: CPU) -> None:
@@ -708,6 +741,178 @@ def _scf(cpu: CPU) -> None:
 
 def _ccf(cpu: CPU) -> None:
     cpu.registers.apply(Flags(n=False, h=False, c=not cpu.registers.c_flag))
+
+
+#
+# --- JR, JP, CALL/RST, RET
+#
+
+# JR: jump relative to address. The offset is relative to the address of the
+# instruction *after* the `JR`
+
+
+def _jr_e8(cpu: CPU) -> None:
+    offset_jump = to_signed8(cpu.fetch_u8())
+    cpu.registers.pc = u16(cpu.registers.pc + offset_jump)
+
+
+def _jr_nz_e8(cpu: CPU) -> bool:
+    offset_jump = to_signed8(cpu.fetch_u8())
+    if condition_met(cpu, Condition.NZ):
+        cpu.registers.pc = u16(cpu.registers.pc + offset_jump)
+        return True
+
+    return False
+
+
+def _jr_z_e8(cpu: CPU) -> bool:
+    offset_jump = to_signed8(cpu.fetch_u8())
+    if condition_met(cpu, Condition.Z):
+        cpu.registers.pc = u16(cpu.registers.pc + offset_jump)
+        return True
+
+    return False
+
+
+def _jr_nc_e8(cpu: CPU) -> bool:
+    offset_jump = to_signed8(cpu.fetch_u8())
+    if condition_met(cpu, Condition.NC):
+        cpu.registers.pc = u16(cpu.registers.pc + offset_jump)
+        return True
+
+    return False
+
+
+def _jr_c_e8(cpu: CPU) -> bool:
+    offset_jump = to_signed8(cpu.fetch_u8())
+    if condition_met(cpu, Condition.C):
+        cpu.registers.pc = u16(cpu.registers.pc + offset_jump)
+        return True
+
+    return False
+
+
+def _jp_hl(cpu: CPU) -> None:
+    address = cpu.registers.hl
+    cpu.registers.pc = address
+
+
+def _jp_nz_a16(cpu: CPU) -> bool:
+    address = cpu.fetch_u16()
+    if condition_met(cpu, Condition.NZ):
+        cpu.registers.pc = address
+        return True
+
+    return False
+
+
+def _jp_z_a16(cpu: CPU) -> bool:
+    address = cpu.fetch_u16()
+    if condition_met(cpu, Condition.Z):
+        cpu.registers.pc = address
+        return True
+
+    return False
+
+
+def _jp_nc_a16(cpu: CPU) -> bool:
+    address = cpu.fetch_u16()
+    if condition_met(cpu, Condition.NC):
+        cpu.registers.pc = address
+        return True
+
+    return False
+
+
+def _jp_c_a16(cpu: CPU) -> bool:
+    address = cpu.fetch_u16()
+    if condition_met(cpu, Condition.C):
+        cpu.registers.pc = address
+        return True
+
+    return False
+
+
+def _call_a16(cpu: CPU) -> None:
+    address = cpu.fetch_u16()
+    cpu.push16(cpu.registers.pc)
+    cpu.registers.pc = address
+
+
+def _call_nz_a16(cpu: CPU) -> bool:
+    address = cpu.fetch_u16()
+    if condition_met(cpu, Condition.NZ):
+        cpu.push16(cpu.registers.pc)
+        cpu.registers.pc = address
+        return True
+
+    return False
+
+
+def _call_z_a16(cpu: CPU) -> bool:
+    address = cpu.fetch_u16()
+    if condition_met(cpu, Condition.Z):
+        cpu.push16(cpu.registers.pc)
+        cpu.registers.pc = address
+        return True
+
+    return False
+
+
+def _call_nc_a16(cpu: CPU) -> bool:
+    address = cpu.fetch_u16()
+    if condition_met(cpu, Condition.NC):
+        cpu.push16(cpu.registers.pc)
+        cpu.registers.pc = address
+        return True
+
+    return False
+
+
+def _call_c_a16(cpu: CPU) -> bool:
+    address = cpu.fetch_u16()
+    if condition_met(cpu, Condition.C):
+        cpu.push16(cpu.registers.pc)
+        cpu.registers.pc = address
+        return True
+
+    return False
+
+
+def _ret(cpu: CPU) -> None:
+    cpu.registers.pc = cpu.pop16()
+
+
+def _ret_nz(cpu: CPU) -> bool:
+    if condition_met(cpu, Condition.NZ):
+        cpu.registers.pc = cpu.pop16()
+        return True
+
+    return False
+
+
+def _ret_z(cpu: CPU) -> bool:
+    if condition_met(cpu, Condition.Z):
+        cpu.registers.pc = cpu.pop16()
+        return True
+
+    return False
+
+
+def _ret_nc(cpu: CPU) -> bool:
+    if condition_met(cpu, Condition.NC):
+        cpu.registers.pc = cpu.pop16()
+        return True
+
+    return False
+
+
+def _ret_c(cpu: CPU) -> bool:
+    if condition_met(cpu, Condition.C):
+        cpu.registers.pc = cpu.pop16()
+        return True
+
+    return False
 
 
 OPCODES: Final[dict[int, Instruction]] = {
@@ -742,4 +947,24 @@ OPCODES: Final[dict[int, Instruction]] = {
     0x2F: Instruction("CPL", 4, _cpl),
     0x37: Instruction("SCF", 4, _scf),
     0x3F: Instruction("CCF", 4, _ccf),
+    0x18: Instruction("JR e8", 12, _jr_e8),
+    0x20: Instruction("JR NZ, e8", 8, _jr_nz_e8, 12),
+    0x28: Instruction("JR Z, e8", 8, _jr_z_e8, 12),
+    0x30: Instruction("JR NC, e8", 8, _jr_nc_e8, 12),
+    0x38: Instruction("JR C, e8", 8, _jr_c_e8, 12),
+    0xC2: Instruction("JP NZ, a16", 12, _jp_nz_a16, 16),
+    0xCA: Instruction("JP Z, a16", 12, _jp_z_a16, 16),
+    0xD2: Instruction("JP NC, a16", 12, _jp_nc_a16, 16),
+    0xDA: Instruction("JP C, a16", 12, _jp_c_a16, 16),
+    0xE9: Instruction("JP HL", 4, _jp_hl),
+    0xCD: Instruction("CALL a16", 24, _call_a16),
+    0xC4: Instruction("CALL NZ, a16", 12, _call_nz_a16, 24),
+    0xCC: Instruction("CALL Z, a16", 12, _call_z_a16, 24),
+    0xD4: Instruction("CALL NC, a16", 12, _call_nc_a16, 24),
+    0xDC: Instruction("CALL C, a16", 12, _call_c_a16, 24),
+    0xC9: Instruction("RET", 16, _ret),
+    0xC0: Instruction("RET NZ", 8, _ret_nz, 20),
+    0xC8: Instruction("RET Z", 8, _ret_z, 20),
+    0xD0: Instruction("RET NC", 8, _ret_nc, 20),
+    0xD8: Instruction("RET C", 8, _ret_c, 20),
 }
