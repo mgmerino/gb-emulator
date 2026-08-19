@@ -249,6 +249,55 @@ def test_fetch_wraps_at_the_top_of_memory(cpu_running: CpuRunning) -> None:
     assert cpu.registers.pc == 0x0000
 
 
+# --- THE STACK ---
+
+
+def test_push_moves_sp_down_two_and_writes_the_low_byte_first(
+    cpu_running: CpuRunning,
+) -> None:
+    cpu = cpu_running()
+    cpu.registers.sp = 0xFFFE
+
+    cpu.push16(0x1234)
+
+    assert cpu.registers.sp == 0xFFFC
+    assert cpu.bus.read(0xFFFC) == 0x34
+    assert cpu.bus.read(0xFFFD) == 0x12
+
+
+def test_push_then_pop_returns_the_value_and_restores_sp(
+    cpu_running: CpuRunning,
+) -> None:
+    cpu = cpu_running()
+    cpu.registers.sp = 0xFFFE
+
+    cpu.push16(0x1234)
+
+    assert cpu.pop16() == 0x1234
+    assert cpu.registers.sp == 0xFFFE
+
+
+def test_the_stack_pops_in_reverse_order(cpu_running: CpuRunning) -> None:
+    cpu = cpu_running()
+    cpu.registers.sp = 0xFFFE
+
+    cpu.push16(0xAABB)
+    cpu.push16(0xCCDD)
+
+    assert cpu.pop16() == 0xCCDD
+    assert cpu.pop16() == 0xAABB
+    assert cpu.registers.sp == 0xFFFE
+
+
+def test_sp_wraps_at_sixteen_bits(cpu_running: CpuRunning) -> None:
+    cpu = cpu_running()
+    cpu.registers.sp = 0x0000
+
+    cpu.push16(0x1234)
+
+    assert cpu.registers.sp == 0xFFFE
+
+
 def test_nop_advances_pc_by_one_and_costs_four_cycles(cpu_running: CpuRunning) -> None:
     cpu = cpu_running(0x00)
 

@@ -208,6 +208,16 @@ class CPU:
 
         return instruction.cycles
 
+    def push16(self, value: int) -> None:
+        self.registers.sp = u16(self.registers.sp - 2)
+        self.bus.write16(self.registers.sp, value)
+
+    def pop16(self) -> int:
+        value = self.bus.read16(self.registers.sp)
+        self.registers.sp = u16(self.registers.sp + 2)
+
+        return value
+
 
 class Operand(IntEnum):
     B = 0b000
