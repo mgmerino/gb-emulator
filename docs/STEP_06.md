@@ -135,9 +135,9 @@ representation makes unspellable.**
 **The Python mechanics.** Three ways to turn `0xFC` into `−4`:
 
 ```python
-value - 0x100 if value & 0x80 else value      # arithmetic
-int.from_bytes(bytes([value]), signed=True)   # stdlib, honest about what it is
-struct.unpack("b", bytes([value]))[0]         # the C-ish one
+value - 0x100 if value & 0x80 else value  # arithmetic
+int.from_bytes(bytes([value]), signed=True)  # stdlib, honest about what it is
+struct.unpack("b", bytes([value]))[0]  # the C-ish one
 ```
 
 You already took the first, back in Step 01: `bits.to_signed8`. It is one
@@ -191,7 +191,7 @@ and `PC` must end up past both operand bytes. A body written as
 
 ```python
 if not condition(cpu):
-    return          # <- PC is now pointing at 0x34, which is not an opcode
+    return  # <- PC is now pointing at 0x34, which is not an opcode
 address = cpu.fetch_u16()
 ```
 
@@ -373,7 +373,7 @@ Prefer **B**:
 @dataclass(frozen=True, slots=True)
 class Instruction:
     name: str
-    cycles: int                                  # the not-taken cost
+    cycles: int  # the not-taken cost
     execute: Callable[["CPU"], bool | None]
     cycles_when_taken: int | None = None
 ```
