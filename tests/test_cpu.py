@@ -1722,3 +1722,67 @@ def test_a_taken_jr_wraps_pc_at_the_bottom_of_memory(
     cpu.step()
 
     assert cpu.registers.pc == 0xFFFE
+
+
+# --- JP cc ---
+
+
+@pytest.mark.parametrize(
+    ("opcode", "z", "c", "expected_pc", "expected_cycles"),
+    [
+        (0xC2, False, False, 0x0150, 16),  # JP NZ, Z clear -> taken
+        (0xC2, True, False, 0x0103, 12),  # JP NZ, Z set    -> not taken
+        (0xCA, True, False, 0x0150, 16),  # JP Z,  Z set    -> taken
+        (0xCA, False, False, 0x0103, 12),  # JP Z,  Z clear -> not taken
+        (0xD2, False, False, 0x0150, 16),  # JP NC, C clear -> taken
+        (0xD2, False, True, 0x0103, 12),  # JP NC, C set    -> not taken
+        (0xDA, False, True, 0x0150, 16),  # JP C,  C set    -> taken
+        (0xDA, False, False, 0x0103, 12),  # JP C,  C clear -> not taken
+    ],
+    ids=[
+        "NZ-taken",
+        "NZ-skipped",
+        "Z-taken",
+        "Z-skipped",
+        "NC-taken",
+        "NC-skipped",
+        "C-taken",
+        "C-skipped",
+    ],
+)
+def test_conditional_jp_branches_only_when_its_condition_holds(
+    cpu_running: CpuRunning,
+    opcode: int,
+    z: bool,
+    c: bool,
+    expected_pc: int,
+    expected_cycles: int,
+) -> None:
+    cpu = cpu_running(opcode, 0x50, 0x01)
+    cpu.registers.z_flag = z
+    cpu.registers.c_flag = c
+
+    assert cpu.step() == expected_cycles
+    assert cpu.registers.pc == expected_pc
+
+
+@pytest.mark.parametrize(
+    ("opcode", "name"),
+    [
+        (0xC3, "JP a16"),
+        (0xC2, "JP NZ, a16"),
+        (0xCA, "JP Z, a16"),
+        (0xD2, "JP NC, a16"),
+        (0xDA, "JP C, a16"),
+    ],
+)
+def test_the_jp_table_entries_are_named_and_costed(opcode: int, name: str) -> None:
+    instruction = OPCODES[opcode]
+
+    assert instruction.name == name
+    if opcode == 0xC3:
+        assert instruction.cycles == 16
+        assert instruction.cycles_when_taken is None
+    else:
+        assert instruction.cycles == 12
+        assert instruction.cycles_when_taken == 16

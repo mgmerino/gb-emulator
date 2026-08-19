@@ -792,6 +792,42 @@ def _jr_c(cpu: CPU) -> bool:
     return False
 
 
+def _jp_nz(cpu: CPU) -> bool:
+    address = cpu.fetch_u16()
+    if condition_met(cpu, Condition.NZ):
+        cpu.registers.pc = address
+        return True
+
+    return False
+
+
+def _jp_z(cpu: CPU) -> bool:
+    address = cpu.fetch_u16()
+    if condition_met(cpu, Condition.Z):
+        cpu.registers.pc = address
+        return True
+
+    return False
+
+
+def _jp_nc(cpu: CPU) -> bool:
+    address = cpu.fetch_u16()
+    if condition_met(cpu, Condition.NC):
+        cpu.registers.pc = address
+        return True
+
+    return False
+
+
+def _jp_c(cpu: CPU) -> bool:
+    address = cpu.fetch_u16()
+    if condition_met(cpu, Condition.C):
+        cpu.registers.pc = address
+        return True
+
+    return False
+
+
 OPCODES: Final[dict[int, Instruction]] = {
     0x00: Instruction("NOP", 4, _nop),
     0xC3: Instruction("JP a16", 16, _jp_a16),
@@ -829,4 +865,8 @@ OPCODES: Final[dict[int, Instruction]] = {
     0x28: Instruction("JR Z, e8", 8, _jr_z, 12),
     0x30: Instruction("JR NC, e8", 8, _jr_nc, 12),
     0x38: Instruction("JR C, e8", 8, _jr_c, 12),
+    0xC2: Instruction("JP NZ, a16", 12, _jp_nz, 16),
+    0xCA: Instruction("JP Z, a16", 12, _jp_z, 16),
+    0xD2: Instruction("JP NC, a16", 12, _jp_nc, 16),
+    0xDA: Instruction("JP C, a16", 12, _jp_c, 16),
 }
