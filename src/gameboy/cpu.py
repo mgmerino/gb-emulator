@@ -890,12 +890,14 @@ def _ret_nz(cpu: CPU) -> bool:
 
     return False
 
+
 def _ret_z(cpu: CPU) -> bool:
     if condition_met(cpu, Condition.Z):
         cpu.registers.pc = cpu.pop16()
         return True
 
     return False
+
 
 def _ret_nc(cpu: CPU) -> bool:
     if condition_met(cpu, Condition.NC):
@@ -904,12 +906,14 @@ def _ret_nc(cpu: CPU) -> bool:
 
     return False
 
+
 def _ret_c(cpu: CPU) -> bool:
     if condition_met(cpu, Condition.C):
         cpu.registers.pc = cpu.pop16()
         return True
 
     return False
+
 
 OPCODES: Final[dict[int, Instruction]] = {
     0x00: Instruction("NOP", 4, _nop),
