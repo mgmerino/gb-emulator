@@ -1590,3 +1590,112 @@ def test_daa_corrects_a_bcd_program(
     assert cpu.registers.a == expected_a
     assert cpu.registers.f == expected_f
     assert cpu.registers.pc == 0x0105  # 2 + 2 + 1 bytes
+
+
+# --- JR ---
+
+
+def test_jr_jumps_forward_relative_to_the_next_instruction(
+    cpu_running: CpuRunning,
+) -> None:
+    cpu = cpu_running(0x18, 0x05)
+
+    assert cpu.step() == 12
+    # After both bytes are fetched PC is 0x0102, and the offset counts from
+    # there: 0x0102 + 5.
+    assert cpu.registers.pc == 0x0107
+
+
+def test_jr_jumps_backward_on_a_negative_offset(cpu_running: CpuRunning) -> None:
+    cpu = cpu_running(0x18, 0xFC, at=0x0216)
+
+    assert cpu.step() == 12
+    # 0xFC is -4 as a signed byte. PC is 0x0218 after the fetch, so 0x0214.
+    assert cpu.registers.pc == 0x0214
+
+
+@pytest.mark.parametrize(
+    ("opcode", "z", "c", "expected_pc", "expected_cycles"),
+    [
+        (0x20, False, False, 0x0107, 12),  # JR NZ, Z clear -> taken
+        (0x20, True, False, 0x0102, 8),  # JR NZ, Z set     -> not taken
+        (0x28, True, False, 0x0107, 12),  # JR Z,  Z set    -> taken
+        (0x28, False, False, 0x0102, 8),  # JR Z,  Z clear  -> not taken
+        (0x30, False, False, 0x0107, 12),  # JR NC, C clear -> taken
+        (0x30, False, True, 0x0102, 8),  # JR NC, C set     -> not taken
+        (0x38, False, True, 0x0107, 12),  # JR C,  C set    -> taken
+        (0x38, False, False, 0x0102, 8),  # JR C,  C clear  -> not taken
+    ],
+    ids=[
+        "NZ-taken",
+        "NZ-skipped",
+        "Z-taken",
+        "Z-skipped",
+        "NC-taken",
+        "NC-skipped",
+        "C-taken",
+        "C-skipped",
+    ],
+)
+def test_conditional_jr_branches_only_when_its_condition_holds(
+    cpu_running: CpuRunning,
+    opcode: int,
+    z: bool,
+    c: bool,
+    expected_pc: int,
+    expected_cycles: int,
+) -> None:
+    cpu = cpu_running(opcode, 0x05)
+    cpu.registers.z_flag = z
+    cpu.registers.c_flag = c
+
+    assert cpu.step() == expected_cycles
+    assert cpu.registers.pc == expected_pc
+
+
+def test_jr_does_not_touch_the_flags(cpu_running: CpuRunning) -> None:
+    cpu = cpu_running(0x18, 0x05)
+    cpu.registers.z_flag = True
+    cpu.registers.c_flag = True
+    cpu.registers.n_flag = True
+    cpu.registers.h_flag = True
+
+    cpu.step()
+
+    assert cpu.registers.f == 0xF0
+
+
+def test_jr_nz_runs_a_loop_to_completion(cpu_running: CpuRunning) -> None:
+    # 0100  06 03   LD B, 3
+    # 0102  05      DEC B
+    # 0103  20 FD   JR NZ, -3   -> back to 0102 while B is not zero
+    # 0105  00      NOP
+    cpu = cpu_running(0x06, 0x03, 0x05, 0x20, 0xFD, 0x00)
+
+    for _ in range(7):
+        cpu.step()
+
+    assert cpu.registers.b == 0x00
+    assert cpu.registers.pc == 0x0105
+
+
+@pytest.mark.parametrize(
+    ("opcode", "name"),
+    [
+        (0x18, "JR e8"),
+        (0x20, "JR NZ, e8"),
+        (0x28, "JR Z, e8"),
+        (0x30, "JR NC, e8"),
+        (0x38, "JR C, e8"),
+    ],
+)
+def test_the_jr_table_entries_are_named_and_costed(opcode: int, name: str) -> None:
+    instruction = OPCODES[opcode]
+
+    assert instruction.name == name
+    if opcode == 0x18:
+        assert instruction.cycles == 12
+        assert instruction.cycles_when_taken is None
+    else:
+        assert instruction.cycles == 8
+        assert instruction.cycles_when_taken == 12

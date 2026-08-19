@@ -16,7 +16,7 @@ from enum import IntEnum
 from typing import Final, Self
 
 from gameboy.alu import Flags, adc, add, add16, and_, daa, dec, inc, or_, sbc, sub, xor
-from gameboy.bits import get_bit, high_byte, join_bytes, low_byte, u8, u16
+from gameboy.bits import get_bit, high_byte, join_bytes, low_byte, to_signed8, u8, u16
 from gameboy.memory import MemoryDevice
 
 # Since masking is _expected_ to be executed from the top layer, we want to ensure
@@ -743,6 +743,55 @@ def _ccf(cpu: CPU) -> None:
     cpu.registers.apply(Flags(n=False, h=False, c=not cpu.registers.c_flag))
 
 
+#
+# --- JR, JP, CALL/RST, RET
+#
+
+# JR: jump relative to address. The offset is relative to the address of the
+# instruction *after* the `JR`
+
+
+def _jr(cpu: CPU) -> None:
+    offset_jump = to_signed8(cpu.fetch_u8())
+    cpu.registers.pc = cpu.registers.pc + offset_jump
+
+
+def _jr_nz(cpu: CPU) -> bool:
+    offset_jump = to_signed8(cpu.fetch_u8())
+    if condition_met(cpu, Condition.NZ):
+        cpu.registers.pc = u16(cpu.registers.pc + offset_jump)
+        return True
+
+    return False
+
+
+def _jr_z(cpu: CPU) -> bool:
+    offset_jump = to_signed8(cpu.fetch_u8())
+    if condition_met(cpu, Condition.Z):
+        cpu.registers.pc = u16(cpu.registers.pc + offset_jump)
+        return True
+
+    return False
+
+
+def _jr_nc(cpu: CPU) -> bool:
+    offset_jump = to_signed8(cpu.fetch_u8())
+    if condition_met(cpu, Condition.NC):
+        cpu.registers.pc = u16(cpu.registers.pc + offset_jump)
+        return True
+
+    return False
+
+
+def _jr_c(cpu: CPU) -> bool:
+    offset_jump = to_signed8(cpu.fetch_u8())
+    if condition_met(cpu, Condition.C):
+        cpu.registers.pc = u16(cpu.registers.pc + offset_jump)
+        return True
+
+    return False
+
+
 OPCODES: Final[dict[int, Instruction]] = {
     0x00: Instruction("NOP", 4, _nop),
     0xC3: Instruction("JP a16", 16, _jp_a16),
@@ -775,4 +824,9 @@ OPCODES: Final[dict[int, Instruction]] = {
     0x2F: Instruction("CPL", 4, _cpl),
     0x37: Instruction("SCF", 4, _scf),
     0x3F: Instruction("CCF", 4, _ccf),
+    0x18: Instruction("JR e8", 12, _jr),
+    0x20: Instruction("JR NZ, e8", 8, _jr_nz, 12),
+    0x28: Instruction("JR Z, e8", 8, _jr_z, 12),
+    0x30: Instruction("JR NC, e8", 8, _jr_nc, 12),
+    0x38: Instruction("JR C, e8", 8, _jr_c, 12),
 }
