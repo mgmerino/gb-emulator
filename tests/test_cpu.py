@@ -452,6 +452,12 @@ def test_count_cycles_charges_four_per_access() -> None:
     assert count_cycles(immediates=1) - count_cycles() == 4
 
 
+def test_count_cycles_with_prefixed_costs() -> None:
+    assert count_cycles(Operand.B, Operand.B, prefixed=True) == 8
+    assert count_cycles(Operand.HL_POINTER, Operand.HL_POINTER, prefixed=True) == 16
+    assert count_cycles(Operand.B, prefixed=True) == 8
+    assert count_cycles(Operand.HL_POINTER, prefixed=True) == 12
+
 #
 #  --- LOAD BLOCK ---
 #

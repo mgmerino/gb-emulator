@@ -381,13 +381,21 @@ T_CYCLES_PER_ACCESS = 4
 
 
 def count_cycles(
-    *accesses: Operand, immediates: int = 0, data_accesses: int = 0
+    *accesses: Operand,
+    immediates: int = 0,
+    data_accesses: int = 0,
+    prefixed: bool = False,
 ) -> int:
     """Cost of one generated instruction:
-    One access for the opcode fetch, one per immediate byte, and one for
-    every operand access that reads memory.
+    - one access for the opcode fetch,
+    - one extra if prefixed (additional opcode fetch)
+    - one per immediate byte,
+    - and one for every operand access that reads memory.
     """
     total = 1  # the fetch cost one
+    if prefixed:
+        total += 1
+
     for op in accesses:
         if op is Operand.HL_POINTER:
             total += 1  # memory access
