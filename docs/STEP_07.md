@@ -24,12 +24,12 @@ after today is either a Step 08 opcode or a jump that went somewhere wrong, and
 knowing which of the two you are looking at is most of the debugging you will do
 in Step 10.
 
-This is also the step where the shape of the code stops being optional. The 40
-instructions of Step 06 were written out by hand, one body per opcode, and that
-worked — the tests are green and the cycle counts are right. 256 cannot be
-written that way, not because it is tedious but because a table you cannot read
-in one screen is a table whose mistakes you cannot see. Theory section 2 is about
-that specifically.
+It is also the first step whose block cannot be written out by hand. Step 06's
+40 instructions were, and that was the right call — the tests are green and the
+cycle counts are right. 256 is a different regime, not because it is tedious but
+because nobody audits 256 functions by reading them, so a generator becomes the
+only form in which the block can be checked at all. Theory section 2 draws that
+line explicitly, and says where Step 06 falls on it.
 
 > **Visual companion:** the eight rotate and shift operations animate well — one
 > byte, the carry bit beside it, and the bits walking. Ask if the difference
@@ -102,7 +102,7 @@ be unknown either. `len(CB_OPCODES) == 256` is a real test, and it is the only
 place in this project where a table's completeness is a provable property rather
 than a hope.
 
-### 2. The most regular block in the machine, and why that matters today
+### 2. When generation earns its place, and when it does not
 
 Every CB opcode decodes the same way. The low three bits are always an operand,
 the same `Operand` enum the `LD` block and the `ALU` block already use, in the
@@ -115,50 +115,59 @@ same positions:
 | `0x80`–`0xBF` | `10 bbb rrr` | `RES b, r` |
 | `0xC0`–`0xFF` | `11 bbb rrr` | `SET b, r` |
 
-Three bit fields, no exceptions, no holes. 256 instructions out of one loop over
-`range(0x100)`, an eight-element tuple of operations, and three small generators
-— roughly the size of `_alu_block()` and `_inc_dec_block()` put together.
+Three bit fields, no exceptions, no holes. This block is going to be generated,
+and it is worth being precise about *why* — because `cpu.py` already contains
+both shapes and the split between them should be a rule rather than a mood.
 
-This is the point in the project to be blunt about generation, because Step 06 is
-sitting in `cpu.py` as forty hand-written bodies and this step will not fit
-beside them.
+| Generated | Written out |
+| --- | --- |
+| `_ld_block`, `_alu_block`, `_alu_immediate_block`, `_inc_dec_block`, `_pair_block` | the accumulator loads, the flag oddities, and all 40 instructions of Step 06 |
 
-Look at `_jr_nz_e8`, `_jr_z_e8`, `_jr_nc_e8`, `_jr_c_e8`. Four functions, five
-lines each, differing in one enum member. Then the same four for `JP`, the same
-four for `CALL`, the same four for `RET`, eight for `RST`, eight for
-`PUSH`/`POP`. The code is correct — the tests say so — and it is not *bad* code.
-What it is, is code where **correctness has to be established by reading, one
-body at a time**, and where the reading has to be redone every time anything
-changes.
+The rule is not "how many" on its own. It is a ratio: **entries produced,
+divided by makers required.** A generator is a level of indirection, and
+indirection is paid for once per *reader*, every time anyone asks "what does this
+opcode do". It has to buy enough to cover that.
 
-The concrete cost, stated as the bugs it does not prevent:
+Run the test on Step 06. The four conditional families look uniform from the
+outside, but their bodies genuinely differ:
 
-- A wrong condition in one of sixteen near-identical bodies is invisible to
-  inspection. It passes review by looking like its neighbours. Generated from
-  `Condition((opcode >> 3) & 0b11)`, the condition cannot be wrong for one entry
-  and right for the other fifteen — either the expression is right and all
-  sixteen are, or it is wrong and every test fails at once.
-- The 22 lines of `_rst_00` through `_rst_38` differ only in a constant that is
-  `(opcode >> 3) * 8`. Note that they are also written out of order in the file
-  (`0x00`, `0x10`, `0x08`, `0x18`, …), which is exactly the kind of thing that
-  stops being noticeable at forty functions and stops being *findable* at
-  four hundred.
-- A table whose entries were typed individually has to be tested individually.
-  A generated table is tested by testing the generator plus a handful of
-  spot-checks, which is what `test_cpu.py` already does for the `LD` and `ALU`
-  blocks — and why those blocks have 64 entries each and a fraction of the tests.
+- `JR cc` fetches one signed byte and adds it to `PC`
+- `JP cc` fetches two bytes and assigns
+- `CALL cc` fetches two bytes, pushes, then assigns
+- `RET cc` fetches nothing and pops
 
-So: **Task 0 of this step is to fold Step 06's four conditional families and the
-`RST`, `PUSH` and `POP` blocks into generators.** Not for tidiness. Because the
-CB block is going to be written as generators no matter what, and having two
-mechanisms in one file — "some instructions are generated from bit fields, some
-are typed out" — is worse than either one alone. A reader who has understood
-`_alu_block` should be able to read every block in the file.
+So a generator needs four makers, not one, plus a table associating them with
+base opcodes and cycle pairs. Forty hand-written bodies collapse to roughly six
+makers and two tables — call it **6:1** — and in exchange, "what does `0xC4` do"
+goes from *read one function* to *find the family, decode `(0xC4 >> 3) & 0b11`,
+resolve the `Condition` member, read the maker*. One step becomes four.
 
-It is also the cheapest possible refactor to verify: the tests already exist, the
-table is a dict, and `OPCODES` before and after must be identical in keys, names
-and cycle counts. You can assert that literally, in a scratch script, by
-comparing against a snapshot of the current table. That is worth doing once.
+Now run it on the CB block: 256 entries, three makers, one eight-element tuple.
+Roughly **85:1**, and the bodies really are one shape with a parameter —
+`read_operand`, transform, `write_operand`, apply flags — with no family-by-family
+variation at all.
+
+Same rule, opposite answers. That is what makes it a rule rather than a
+preference, and it is why this document generates the CB block and leaves Step 06
+alone.
+
+Two costs of generation worth naming, because they vanish from view when line
+count is the only thing being counted:
+
+- **Symbol names disappear.** `_call_nz_a16` identifies itself in a traceback, in
+  a profile and in a `git grep`. A closure named `execute` inside
+  `_make_conditional` gives you one name for sixteen instructions. In Step 10 you
+  will be reading failures out of a test ROM, which is exactly when you want the
+  frame to name the instruction.
+- **Irregularities become special cases inside a loop**, where they are harder to
+  see than they were as one odd function among forty. `RET cc` taking no operand,
+  and `StackPair` disagreeing with `RegisterPair` at `0b11`, are both this.
+
+Past a few hundred entries the argument changes character rather than degree.
+Nobody audits 256 functions by reading them, so "I can see that it is right"
+stops being available, and the generator is not a compression of something
+already checked — it is the only form in which the block *can* be checked.
+Sections 4 through 7 are written on that assumption.
 
 ### 3. The eight rotates and shifts
 
@@ -481,36 +490,6 @@ that is a judgement call about failure output, not about correctness.
 
 ## Tasks
 
-### 0. Fold Step 06 into generators
-
-Per theory section 2, and before anything else in this step.
-
-Four conditional families, and `RST`, `PUSH`, `POP`:
-
-| Pattern | Family | Field |
-| --- | --- | --- |
-| `001 cc 000` | `JR cc, e8` | `Condition((opcode >> 3) & 0b11)` |
-| `110 cc 010` | `JP cc, a16` | same |
-| `110 cc 100` | `CALL cc, a16` | same |
-| `110 cc 000` | `RET cc` | same |
-| `11 ttt 111` | `RST` | target is `((opcode >> 3) & 0b111) * 8` |
-| `11 pp 0101` / `11 pp 0001` | `PUSH` / `POP` | `StackPair((opcode >> 4) & 0b11)` |
-
-The four condition families share one maker shape: fetch the operand, test the
-condition, act, return whether it acted. `RET cc` has no operand and is the
-exception — write it separately rather than bending the maker.
-
-`_PAIR_FAMILIES` in the 16-bit block is the shape to copy: a tuple of
-(base opcode, name template, cycles, maker) and one loop.
-
-**Acceptance:** `OPCODES` has the same 235 keys, with the same `name`, `cycles`
-and `cycles_when_taken` for every one of them, and `uv run pytest` passes with
-**zero changes to any test**. Prove the first half rather than assuming it —
-snapshot `{op: (i.name, i.cycles, i.cycles_when_taken) for op, i in OPCODES.items()}`
-to a file before you start, and diff after.
-
----
-
 ### 1. The eight operations in `alu.py`
 
 `rlc`, `rrc`, `rl`, `rr`, `sla`, `sra`, `swap`, `srl`, each
@@ -679,6 +658,40 @@ example in it now runs further than three instructions, it is worth refreshing.
 
 ---
 
+### Optional: two warts in the Step 06 block
+
+Neither of these is the generator argument from section 2. They are two specific
+things that are wrong on their own terms, whichever shape you prefer.
+
+**`PUSH`/`POP` dispatch through a `match` to reach a constant.** `_push_bc` is:
+
+```python
+value = read_stack_pair(cpu, StackPair.BC)
+cpu.push16(value)
+```
+
+`read_stack_pair` is a four-way `match`, and its argument is a literal constant
+at every one of its eight call sites. That function exists to serve *generated*
+code, where the pair is a variable. In a hand-written body it is indirection with
+nobody paying for it, and `cpu.push16(cpu.registers.bc)` says the same thing in
+one line and one attribute access.
+
+Going fully explicit there lets `read_stack_pair` and `write_stack_pair` be
+deleted outright — nothing else calls them, including the tests — and leaves
+`StackPair` as what it actually is: documentation of the encoding, and the thing
+that keeps `0b11 == AF` from being a bare `3` in a comment.
+
+Keep the helpers if you would rather. But then those eight bodies are the
+generated shape *without* the generator, which is the one combination nothing
+argues for.
+
+**The `RST` bodies are out of numeric order.** `cpu.py:1003` onwards runs `0x00`,
+`0x10`, `0x08`, `0x18`, `0x20`, … The table entries are in order and the
+functions are not. One reorder, and it is the kind of thing that is free to fix
+now and irritating later.
+
+---
+
 ## Hints
 
 - If `RL` round-trips against `RR` but a test ROM disagrees, you implemented `RL`
@@ -701,16 +714,11 @@ example in it now runs further than three instructions, it is worth refreshing.
 - Cross-check the cycle table against <https://gbdev.io/gb-opcodes/optables/>.
   The CB page lists register forms as 8 and `(HL)` forms as 16, with `BIT`'s 12
   as the only exception, exactly as section 7 derives.
-- When Task 0's diff of the table snapshot shows a difference, it is almost
-  always a cycle count that was typed as a literal in Step 06 and is derived now
-  — check it against the optable rather than making the generator reproduce it.
 
 ---
 
 ## Acceptance criteria
 
-- [ ] Step 06's conditional families, `RST`, `PUSH` and `POP` are generated, and
-      `OPCODES` is byte-for-byte the same table it was before the refactor.
 - [ ] `len(OPCODES) == 240` and `len(CB_OPCODES) == 256`.
 - [ ] Every opcode in `range(0x100)` is either in `OPCODES`, in the Step 08 list
       (`0x10` `0x76` `0xD9` `0xF3` `0xFB`), or in the illegal list.
@@ -734,10 +742,11 @@ example in it now runs further than three instructions, it is worth refreshing.
 
 ## Questions to ask yourself before moving on
 
-1. Task 0 asked you to convert working, tested code into a different shape that
-   does the same thing. What did the conversion find? If it found nothing, was it
-   worth doing — and would your answer change if the file had another 256
-   instructions in it, which it now does?
+1. Section 2's ratio test generates at 85:1 and declines at 6:1. Where between
+   those two does your own line sit, and which input actually moves it — the
+   ratio, the absolute entry count, or how much you trust the tests to catch a
+   copy-paste slip? Steps 11 and 12 have the same decision waiting in the PPU,
+   and it will be easier if you have already named the number.
 2. `BIT` costs 12 cycles on `(HL)` and writes nothing back. Those are two
    statements of one fact. Did they end up as one thing in your code or two, and
    what would go wrong if someone changed one of them?
