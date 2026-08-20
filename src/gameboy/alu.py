@@ -1,6 +1,6 @@
 from dataclasses import dataclass
 
-from gameboy.bits import u8, u16
+from gameboy.bits import get_bit, u8, u16
 
 
 @dataclass(frozen=True, slots=True)
@@ -210,5 +210,76 @@ def daa(a: int, n: bool, h: bool, c: bool) -> tuple[int, Flags]:
         result = u8(a - adjust)
 
     flags = Flags(z=result == 0, n=None, h=False, c=c)
+
+    return result, flags
+
+
+# rotation left carry
+def rlc(value: int) -> tuple[int, Flags]:
+    carry_out = get_bit(value, 7)  # leftmost bit
+    result = u8(value << 1 | value >> 7)
+    flags = Flags(z=result == 0, n=False, h=False, c=carry_out)
+
+    return result, flags
+
+
+# rotation left
+def rl(value: int, carry: bool) -> tuple[int, Flags]:
+    carry_out = get_bit(value, 7)
+    result = u8(value << 1 | carry)
+    flags = Flags(z=result == 0, n=False, h=False, c=carry_out)
+
+    return result, flags
+
+
+# shift left arithmetic
+def sla(value: int) -> tuple[int, Flags]:
+    carry_out = get_bit(value, 7)
+    result = u8(value << 1)
+    flags = Flags(z=result == 0, n=False, h=False, c=carry_out)
+
+    return result, flags
+
+
+# rotation right carry
+def rrc(value: int) -> tuple[int, Flags]:
+    carry_out = get_bit(value, 0)  # rightmost bit
+    result = u8(value >> 1 | value << 7)
+    flags = Flags(z=result == 0, n=False, h=False, c=carry_out)
+
+    return result, flags
+
+
+# rotation right
+def rr(value: int, carry: bool) -> tuple[int, Flags]:
+    carry_out = get_bit(value, 0)
+    result = u8(value >> 1 | carry << 7)
+    flags = Flags(z=result == 0, n=False, h=False, c=carry_out)
+
+    return result, flags
+
+
+# shift right arithmetic
+def sra(value: int) -> tuple[int, Flags]:
+    special_bit = get_bit(value, 7)  # leftmost
+    carry_out = get_bit(value, 0)  # rightmost
+    result = u8(value >> 1 | special_bit << 7)
+    flags = Flags(z=result == 0, n=False, h=False, c=carry_out)
+
+    return result, flags
+
+
+#  shift right logical
+def srl(value: int) -> tuple[int, Flags]:
+    carry_out = get_bit(value, 0)
+    result = u8(value >> 1)
+    flags = Flags(z=result == 0, n=False, h=False, c=carry_out)
+
+    return result, flags
+
+
+def swap(value: int) -> tuple[int, Flags]:
+    result = u8(value >> 4 | value << 4)
+    flags = Flags(z=result == 0, n=False, h=False, c=False)
 
     return result, flags

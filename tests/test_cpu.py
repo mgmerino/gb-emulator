@@ -452,6 +452,13 @@ def test_count_cycles_charges_four_per_access() -> None:
     assert count_cycles(immediates=1) - count_cycles() == 4
 
 
+def test_count_cycles_with_prefixed_costs() -> None:
+    assert count_cycles(Operand.B, Operand.B, prefixed=True) == 8
+    assert count_cycles(Operand.HL_POINTER, Operand.HL_POINTER, prefixed=True) == 16
+    assert count_cycles(Operand.B, prefixed=True) == 8
+    assert count_cycles(Operand.HL_POINTER, prefixed=True) == 12
+
+
 #
 #  --- LOAD BLOCK ---
 #
@@ -2343,3 +2350,52 @@ def test_the_sp_arithmetic_table_entries_are_named_and_costed(
     assert instruction.name == name
     assert instruction.cycles == cycles
     assert instruction.cycles_when_taken is None
+
+
+#
+#  --- CB PREFIX DISPATCH ---
+#
+
+
+def test_the_cb_prefix_is_not_an_instruction_of_its_own() -> None:
+    assert 0xCB not in OPCODES
+
+
+def test_the_cb_prefix_decodes_from_the_second_table(cpu_running: CpuRunning) -> None:
+    # 0x00 is NOP in the base table, so raising at all proves CB_OPCODES was the
+    # table consulted. Delete once that table is complete: 0xCB 0x00 becomes
+    # RLC B and stops raising.
+    cpu = cpu_running(0xCB, 0x00)
+
+    assert 0x00 in OPCODES
+
+    with pytest.raises(UnknownOpcodeError):
+        cpu.step()
+
+
+def test_the_cb_prefix_consumes_both_bytes(cpu_running: CpuRunning) -> None:
+    cpu = cpu_running(0xCB, 0x00, at=0x0100)
+
+    with pytest.raises(UnknownOpcodeError):
+        cpu.step()
+
+    assert cpu.registers.pc == 0x0102
+
+
+def test_an_unknown_cb_opcode_reports_the_start_of_the_instruction(
+    cpu_running: CpuRunning,
+) -> None:
+    # 0x0100, not 0x0101: the instruction's first byte, matching the tracer.
+    cpu = cpu_running(0xCB, 0x00, at=0x0100)
+
+    with pytest.raises(UnknownOpcodeError, match="unknown opcode 0xCB at 0x0100"):
+        cpu.step()
+
+
+def test_an_unprefixed_opcode_still_decodes_from_the_base_table(
+    cpu_running: CpuRunning,
+) -> None:
+    cpu = cpu_running(0x00)
+
+    assert cpu.step() == 4
+    assert cpu.registers.pc == 0x0101
