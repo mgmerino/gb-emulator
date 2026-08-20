@@ -214,10 +214,21 @@ class CPU:
         # PC advances before execution, not after. By the time an instruction
         # runs, PC already points at its first operand byte.
         opcode = self.fetch_u8()
-        instruction = OPCODES.get(opcode)
+        cb_opcode = None
+
+        if opcode == 0xCB:
+            cb_opcode = self.fetch_u8()
+            instruction = CB_OPCODES.get(cb_opcode)
+        else:
+            instruction = OPCODES.get(opcode)
 
         if instruction is None:
-            raise UnknownOpcodeError(opcode, u16(self.registers.pc - 1))
+            if cb_opcode is not None:
+                address = u16(self.registers.pc - 2)
+            else:
+                address = u16(self.registers.pc - 1)
+
+            raise UnknownOpcodeError(opcode, address)
 
         taken = instruction.execute(self)
         if taken and instruction.cycles_when_taken is not None:
@@ -1142,3 +1153,5 @@ OPCODES: Final[dict[int, Instruction]] = {
     0xF8: Instruction("LD HL, SP+e8", 12, _ld_hl_sp_e8),
     0xF9: Instruction("LD SP, HL", 8, _ld_sp_hl),
 }
+
+CB_OPCODES: Final[dict[int, Instruction]] = {}
