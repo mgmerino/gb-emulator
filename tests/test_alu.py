@@ -12,6 +12,7 @@ import pytest
 
 from gameboy import alu
 from gameboy.alu import Flags
+from gameboy.bits import get_bit, to_signed8, u8
 
 type BinaryOp = Callable[[int, int], tuple[int, Flags]]
 
@@ -299,3 +300,160 @@ def test_daa_clears_the_half_carry_and_leaves_n_alone(n: bool) -> None:
 
     assert flags.h is False
     assert flags.n is None
+
+
+#
+# --- rotates, shifts and swap ---
+#
+
+type ShiftOp = Callable[[int, bool], tuple[int, Flags]]
+
+# Normalised so every op takes the incoming carry; the six that never read it
+# discard it. Same lambda-wrapping idiom as `_ALU_OPERATIONS` in cpu.py.
+SHIFTS: dict[str, ShiftOp] = {
+    "rlc": lambda value, _carry: alu.rlc(value),
+    "rrc": lambda value, _carry: alu.rrc(value),
+    "rl": alu.rl,
+    "rr": alu.rr,
+    "sla": lambda value, _carry: alu.sla(value),
+    "sra": lambda value, _carry: alu.sra(value),
+    "swap": lambda value, _carry: alu.swap(value),
+    "srl": lambda value, _carry: alu.srl(value),
+}
+
+DEPARTING_BIT = {"rlc": 7, "rl": 7, "sla": 7, "rrc": 0, "rr": 0, "sra": 0, "srl": 0}
+
+BYTES = range(0x100)
+
+
+@pytest.mark.parametrize(
+    "name, bit", list(DEPARTING_BIT.items()), ids=list(DEPARTING_BIT)
+)
+@pytest.mark.parametrize("carry_in", [False, True], ids=["c=0", "c=1"])
+def test_carry_is_the_bit_that_left_the_byte(
+    name: str, bit: int, carry_in: bool
+) -> None:
+    for value in BYTES:
+        _, flags = SHIFTS[name](value, carry_in)
+        assert flags.c is get_bit(value, bit), f"{name}({value:#04x})"
+
+
+def test_swap_clears_the_carry() -> None:
+    for value in BYTES:
+        _, flags = alu.swap(value)
+        assert flags.c is False, f"swap({value:#04x})"
+
+
+def test_rlc_brings_the_departing_bit_around() -> None:
+    for value in BYTES:
+        result, _ = alu.rlc(value)
+        assert get_bit(result, 0) is get_bit(value, 7), f"{value:#04x}"
+
+
+def test_rrc_brings_the_departing_bit_around() -> None:
+    for value in BYTES:
+        result, _ = alu.rrc(value)
+        assert get_bit(result, 7) is get_bit(value, 0), f"{value:#04x}"
+
+
+@pytest.mark.parametrize("carry_in", [False, True], ids=["c=0", "c=1"])
+def test_rl_brings_the_incoming_carry_in(carry_in: bool) -> None:
+    for value in BYTES:
+        result, _ = alu.rl(value, carry_in)
+        assert get_bit(result, 0) is carry_in, f"{value:#04x}"
+
+
+@pytest.mark.parametrize("carry_in", [False, True], ids=["c=0", "c=1"])
+def test_rr_brings_the_incoming_carry_in(carry_in: bool) -> None:
+    for value in BYTES:
+        result, _ = alu.rr(value, carry_in)
+        assert get_bit(result, 7) is carry_in, f"{value:#04x}"
+
+
+def test_sla_fills_with_zero() -> None:
+    for value in BYTES:
+        result, _ = alu.sla(value)
+        assert get_bit(result, 0) is False, f"{value:#04x}"
+
+
+def test_srl_fills_with_zero() -> None:
+    for value in BYTES:
+        result, _ = alu.srl(value)
+        assert get_bit(result, 7) is False, f"{value:#04x}"
+
+
+def test_sra_preserves_the_sign_bit() -> None:
+    for value in BYTES:
+        result, _ = alu.sra(value)
+        assert get_bit(result, 7) is get_bit(value, 7), f"{value:#04x}"
+
+
+def test_sla_doubles() -> None:
+    for value in BYTES:
+        result, _ = alu.sla(value)
+        assert result == u8(value * 2), f"{value:#04x}"
+
+
+def test_srl_halves_as_unsigned() -> None:
+    for value in BYTES:
+        result, _ = alu.srl(value)
+        assert result == value // 2, f"{value:#04x}"
+
+
+def test_sra_halves_as_signed() -> None:
+    # Floor division, so SRA(0xFF) is 0xFF: -1 // 2 is -1, not 0.
+    for value in BYTES:
+        result, _ = alu.sra(value)
+        assert to_signed8(result) == to_signed8(value) // 2, f"{value:#04x}"
+
+
+def test_swap_exchanges_the_nibbles() -> None:
+    for value in BYTES:
+        result, _ = alu.swap(value)
+        assert (result >> 4, result & 0x0F) == (value & 0x0F, value >> 4), (
+            f"{value:#04x}"
+        )
+
+
+# Round trips
+
+
+def test_rlc_and_rrc_are_inverses() -> None:
+    for value in BYTES:
+        rotated, _ = alu.rlc(value)
+        back, _ = alu.rrc(rotated)
+        assert back == value, f"{value:#04x}"
+
+
+def test_swap_is_its_own_inverse() -> None:
+    for value in BYTES:
+        once, _ = alu.swap(value)
+        twice, _ = alu.swap(once)
+        assert twice == value, f"{value:#04x}"
+
+
+@pytest.mark.parametrize("carry_in", [False, True], ids=["c=0", "c=1"])
+def test_rl_and_rr_are_inverses_including_the_carry(carry_in: bool) -> None:
+    # If rl and rr are wrong in the same mirrored way, both halves still round
+    # trip and this passes. The contract tests above are what catch that.
+    for value in BYTES:
+        rotated, out = alu.rl(value, carry_in)
+        assert out.c is not None, f"rl left C untouched at {value:#04x}"
+        back, back_out = alu.rr(rotated, out.c)
+        assert (back, back_out.c) == (value, carry_in), f"{value:#04x}"
+
+
+@pytest.mark.parametrize("name", list(SHIFTS), ids=list(SHIFTS))
+@pytest.mark.parametrize("carry_in", [False, True], ids=["c=0", "c=1"])
+def test_n_and_h_are_always_clear(name: str, carry_in: bool) -> None:
+    for value in BYTES:
+        _, flags = SHIFTS[name](value, carry_in)
+        assert (flags.n, flags.h) == (False, False), f"{name}({value:#04x})"
+
+
+@pytest.mark.parametrize("name", list(SHIFTS), ids=list(SHIFTS))
+@pytest.mark.parametrize("carry_in", [False, True], ids=["c=0", "c=1"])
+def test_z_is_set_exactly_when_the_result_is_zero(name: str, carry_in: bool) -> None:
+    for value in BYTES:
+        result, flags = SHIFTS[name](value, carry_in)
+        assert flags.z is (result == 0), f"{name}({value:#04x})"
