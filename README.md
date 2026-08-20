@@ -15,7 +15,8 @@ with the theory, the tasks and the acceptance criteria.
 | 03 | [The memory bus](docs/STEP_03.md) | done |
 | 04 | [CPU state & the fetch-decode-execute skeleton](docs/STEP_04.md) | done |
 | 05 | [Loads, the ALU and the flags](docs/STEP_05.md) | done |
-| 06 | [Jumps, calls and the stack](docs/STEP_06.md) | next |
+| 06 | [Jumps, calls and the stack](docs/STEP_06.md) | done |
+| 07 | [CB-prefixed opcodes: rotates, shifts and bit operations](docs/STEP_07.md) | next |
 
 ## Requirements
 
