@@ -226,8 +226,8 @@ For a value you have already masked to 8 bits — always non-negative — that m
 extend. So:
 
 ```python
-srl = value >> 1                       # correct: bit 7 becomes 0
-sra = (value >> 1) | (value & 0x80)    # you re-inject bit 7 yourself
+srl = value >> 1  # correct: bit 7 becomes 0
+sra = (value >> 1) | (value & 0x80)  # you re-inject bit 7 yourself
 ```
 
 In C the distinction lives in the *type*; in Python it lives in the sign of the
