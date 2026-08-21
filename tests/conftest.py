@@ -13,6 +13,7 @@ import pytest
 from gameboy.bits import high_byte, join_bytes, low_byte
 from gameboy.cartridge import Cartridge
 from gameboy.cpu import CPU, Registers
+from gameboy.encoding import Operand
 from gameboy.memory import Bus
 
 
@@ -146,3 +147,14 @@ def cpu_running() -> CpuRunning:
         return CPU(memory, registers)
 
     return _cpu_running
+
+
+REGISTER_OPERANDS = [
+    Operand.B,
+    Operand.C,
+    Operand.D,
+    Operand.E,
+    Operand.H,
+    Operand.L,
+    Operand.A,
+]
