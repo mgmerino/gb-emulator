@@ -11,7 +11,7 @@
 """
 
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from enum import IntEnum
 from typing import Final, Self
 
@@ -1357,6 +1357,38 @@ def _bit_res_set_block() -> dict[int, Instruction]:
     return instructions
 
 
+#
+# --- RLCA, RRCA, RLA, RRA ---
+#
+# `Flags` is frozen, so `replace` returns a copy of what the alu produced with
+# z forced to False: these four always clear Z, while their CB twins take it
+# from the result. Keeping the override here leaves alu.py with one rule.
+
+
+def _rlca(cpu: CPU) -> None:
+    result, flags = rlc(cpu.registers.a)
+    cpu.registers.apply(replace(flags, z=False))
+    cpu.registers.a = result
+
+
+def _rrca(cpu: CPU) -> None:
+    result, flags = rrc(cpu.registers.a)
+    cpu.registers.apply(replace(flags, z=False))
+    cpu.registers.a = result
+
+
+def _rla(cpu: CPU) -> None:
+    result, flags = rl(cpu.registers.a, cpu.registers.c_flag)
+    cpu.registers.apply(replace(flags, z=False))
+    cpu.registers.a = result
+
+
+def _rra(cpu: CPU) -> None:
+    result, flags = rr(cpu.registers.a, cpu.registers.c_flag)
+    cpu.registers.apply(replace(flags, z=False))
+    cpu.registers.a = result
+
+
 OPCODES: Final[dict[int, Instruction]] = {
     0x00: Instruction("NOP", 4, _nop),
     0xC3: Instruction("JP a16", 16, _jp_a16),
@@ -1428,6 +1460,10 @@ OPCODES: Final[dict[int, Instruction]] = {
     0xE8: Instruction("ADD SP, e8", 16, _add_sp_e8),
     0xF8: Instruction("LD HL, SP+e8", 12, _ld_hl_sp_e8),
     0xF9: Instruction("LD SP, HL", 8, _ld_sp_hl),
+    0x07: Instruction("RLCA", 4, _rlca),
+    0x0F: Instruction("RRCA", 4, _rrca),
+    0x17: Instruction("RLA", 4, _rla),
+    0x1F: Instruction("RRA", 4, _rra),
 }
 
 # The CB-prefixed table, the 0xCB escape in `step()`.

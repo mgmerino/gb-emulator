@@ -2733,3 +2733,145 @@ def test_the_bit_families_bind_one_index_per_entry(cpu_running: CpuRunning) -> N
     cpu.step()
 
     assert cpu.registers.b == 0x80
+
+
+#
+#  --- RLCA, RRCA, RLA, RRA ---
+#
+
+# The second byte of each CB twin is the same value as the base opcode: 0x07 is
+# RLCA in the base table and RLC A in the CB one.
+ACCUMULATOR_ROTATES = [(0x07, "RLCA"), (0x0F, "RRCA"), (0x17, "RLA"), (0x1F, "RRA")]
+ROTATE_IDS = [name for _, name in ACCUMULATOR_ROTATES]
+
+
+@pytest.mark.parametrize("opcode, name", ACCUMULATOR_ROTATES, ids=ROTATE_IDS)
+def test_the_accumulator_rotates_are_one_byte_and_four_cycles(
+    cpu_running: CpuRunning, opcode: int, name: str
+) -> None:
+    cpu = cpu_running(opcode)
+    cpu.registers.a = 0x80
+
+    cycles = cpu.step()
+
+    assert OPCODES[opcode].name == name
+    assert cycles == 4
+    assert cpu.registers.pc == 0x0101
+
+
+@pytest.mark.parametrize("opcode, name", ACCUMULATOR_ROTATES, ids=ROTATE_IDS)
+def test_the_accumulator_rotates_always_clear_zero(
+    cpu_running: CpuRunning, opcode: int, name: str
+) -> None:
+    cpu = cpu_running(opcode)
+    cpu.registers.a = 0x00
+    cpu.registers.c_flag = False
+
+    cpu.step()
+
+    assert cpu.registers.a == 0x00
+    assert cpu.registers.z_flag is False
+
+
+@pytest.mark.parametrize("opcode, name", ACCUMULATOR_ROTATES, ids=ROTATE_IDS)
+def test_the_cb_twins_take_zero_from_the_result(
+    cpu_running: CpuRunning, opcode: int, name: str
+) -> None:
+    # Same byte, same arithmetic, opposite answer on Z. This pair is the whole
+    # reason these four were held back from Step 05.
+    cpu = cpu_running(0xCB, opcode)
+    cpu.registers.a = 0x00
+    cpu.registers.c_flag = False
+
+    cpu.step()
+
+    assert cpu.registers.a == 0x00
+    assert cpu.registers.z_flag is True
+
+
+@pytest.mark.parametrize("opcode, name", ACCUMULATOR_ROTATES, ids=ROTATE_IDS)
+@pytest.mark.parametrize("carry", [False, True], ids=["c=0", "c=1"])
+def test_each_accumulator_rotate_matches_its_cb_twin_except_on_zero(
+    cpu_running: CpuRunning, opcode: int, name: str, carry: bool
+) -> None:
+    for value in range(0x100):
+        base = cpu_running(opcode)
+        base.registers.a = value
+        base.registers.c_flag = carry
+        base.step()
+
+        twin = cpu_running(0xCB, opcode)
+        twin.registers.a = value
+        twin.registers.c_flag = carry
+        twin.step()
+
+        assert base.registers.a == twin.registers.a, f"{name} {value:#04x}"
+        assert base.registers.c_flag == twin.registers.c_flag, f"{name} {value:#04x}"
+        assert base.registers.z_flag is False, f"{name} {value:#04x}"
+        assert twin.registers.z_flag is (twin.registers.a == 0), f"{name} {value:#04x}"
+
+
+@pytest.mark.parametrize("opcode, name", ACCUMULATOR_ROTATES, ids=ROTATE_IDS)
+def test_the_accumulator_rotates_clear_n_and_h(
+    cpu_running: CpuRunning, opcode: int, name: str
+) -> None:
+    cpu = cpu_running(opcode)
+    cpu.registers.a = 0x55
+    cpu.registers.n_flag = True
+    cpu.registers.h_flag = True
+
+    cpu.step()
+
+    assert cpu.registers.n_flag is False
+    assert cpu.registers.h_flag is False
+
+
+@pytest.mark.parametrize(
+    "opcode, value, expected_a",
+    [
+        (0x07, 0x80, 0x01),  # RLCA: bit 7 goes to C *and* around to bit 0
+        (0x0F, 0x01, 0x80),  # RRCA: bit 0 goes to C *and* around to bit 7
+        (0x17, 0x80, 0x00),  # RLA: bit 7 to C, bit 0 takes the old carry
+        (0x1F, 0x01, 0x00),  # RRA: bit 0 to C, bit 7 takes the old carry
+    ],
+    ids=ROTATE_IDS,
+)
+def test_the_accumulator_rotates_send_the_departing_bit_to_the_carry(
+    cpu_running: CpuRunning, opcode: int, value: int, expected_a: int
+) -> None:
+    cpu = cpu_running(opcode)
+    cpu.registers.a = value
+    cpu.registers.c_flag = False
+
+    cpu.step()
+
+    assert cpu.registers.a == expected_a
+    assert cpu.registers.c_flag is True
+
+
+@pytest.mark.parametrize(
+    "opcode, expected_a",
+    [(0x17, 0x01), (0x1F, 0x80)],
+    ids=["RLA", "RRA"],
+)
+def test_rla_and_rra_bring_the_incoming_carry_into_the_vacated_end(
+    cpu_running: CpuRunning, opcode: int, expected_a: int
+) -> None:
+    cpu = cpu_running(opcode)
+    cpu.registers.a = 0x00
+    cpu.registers.c_flag = True
+
+    cpu.step()
+
+    assert cpu.registers.a == expected_a
+    assert cpu.registers.c_flag is False
+
+
+def test_the_base_table_is_complete_but_for_step_08_and_the_illegal_opcodes() -> None:
+    # These are the missing opcodes to finish the base table:
+    step_08 = {0x10, 0x76, 0xD9, 0xF3, 0xFB}  # STOP, HALT, RETI, DI, EI
+    illegal = {0xD3, 0xDB, 0xDD, 0xE3, 0xE4, 0xEB, 0xEC, 0xED, 0xF4, 0xFC, 0xFD}
+
+    assert OPCODES.keys() == set(range(0x100)) - step_08 - illegal - {0xCB}
+    assert len(OPCODES) == 239
+    assert len(OPCODES) + 1 + len(step_08) + len(illegal) == 0x100
