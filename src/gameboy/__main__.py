@@ -11,15 +11,25 @@ from gameboy.cartridge import (
     compute_global_checksum,
     compute_header_checksum,
 )
-from gameboy.cpu import CPU, OPCODES, Registers, UnknownOpcodeError
+from gameboy.cpu import (
+    CB_OPCODES,
+    CPU,
+    OPCODES,
+    Instruction,
+    Registers,
+    UnknownOpcodeError,
+)
 from gameboy.memory import Bus, MemoryDevice
 
 type Row = tuple[int, int, str]
 BYTES_PER_ROW = 16
 # 16 groups of two hex digits, 15 separators, plus the extra space at the gutter.
 HEX_WIDTH = BYTES_PER_ROW * 3 - 1 + 1
-# Widest mnemonic in the table today is "LD HL, SP+e8".
+# Widest mnemonic in the table today is "LD HL, SP+e8". The widest CB one is
+# "BIT 7, (HL)", one character shorter.
 NAME_WIDTH = 12
+# Two hex digits per byte and a separator: a prefixed opcode prints as "CB 7E".
+OPCODE_WIDTH = 5
 
 
 def format_size(size: int) -> str:
@@ -101,8 +111,25 @@ def dump(bus: MemoryDevice, start: int, length: int) -> str:
     return "\n".join(lines)
 
 
+def decode(bus: MemoryDevice, address: int) -> tuple[Instruction, int]:
+    opcode = bus.read(address)
+    if opcode == 0xCB:
+        opcode = bus.read(address + 1)
+        instruction = CB_OPCODES[opcode]  # safe to use [] because runs after step
+        size = 2
+    else:
+        instruction = OPCODES[opcode]
+        size = 1
+
+    return (instruction, size)
+
+
+def opcode_bytes(bus: MemoryDevice, address: int, size: int) -> str:
+    return " ".join(f"{bus.read(address + offset):02X}" for offset in range(size))
+
+
 def trace_line(
-    address: int, opcode: int, name: str, registers: Registers, cycles: int
+    address: int, opcodes: str, name: str, registers: Registers, cycles: int
 ) -> str:
     state = (
         f"A:{registers.a:02X} F:{registers.f:02X} "
@@ -110,26 +137,50 @@ def trace_line(
         f"HL:{registers.hl:04X} SP:{registers.sp:04X}"
     )
 
-    return f"{address:04X}  {opcode:02X}  {name:<{NAME_WIDTH}}  {state}  {cycles}"
+    return (
+        f"{address:04X}  {opcodes:<{OPCODE_WIDTH}}  "
+        f"{name:<{NAME_WIDTH}}  {state}  {cycles}"
+    )
 
 
-def trace(bus: MemoryDevice, instructions: int) -> Iterator[str]:
-    """Run the machine for `instructions` steps, yielding one line each."""
+def trace_summary(instructions: int, cycles: int, reason: str) -> str:
+    """One DMG frame is 70224 T-cycles, which is the yardstick this number is
+    read against.
+    """
+    return f"--- {instructions} instructions, {cycles} T-cycles, {reason} ---"
+
+
+def trace(bus: MemoryDevice, instructions: int) -> Iterator[tuple[str, int]]:
+    """Run the machine for `instructions` steps, yielding a line and its cost.
+
+    The caller sums the cycles rather than the generator tracking them: a
+    generator that stops early through an exception cannot report a total, and
+    the loop that consumes it can.
+    """
     cpu = CPU(bus, Registers.post_boot())
 
     for _ in range(instructions):
-        # The address and the opcode have to be captured before stepping,
-        # because it moves the pc. The register state and the cycle count only
-        # exist after.
+        # The address has to be captured before stepping, because it moves the
+        # pc. The register state and the cycle count only exist after.
         address = cpu.registers.pc
-        opcode = bus.read(address)
 
         cycles = cpu.step()
 
-        # step() returned instead of raising, so the opcode is in the table by
-        # definition. That is what makes `[...]` safe here where `step` needs
-        # `.get`.
-        yield trace_line(address, opcode, OPCODES[opcode].name, cpu.registers, cycles)
+        # step() returned instead of raising, so the opcode is in one of the two
+        # tables by definition. That is what makes decode's `[...]` safe where
+        # step itself needs `.get`.
+        instruction, size = decode(bus, address)
+
+        yield (
+            trace_line(
+                address,
+                opcode_bytes(bus, address, size),
+                instruction.name,
+                cpu.registers,
+                cycles,
+            ),
+            cycles,
+        )
 
 
 def main() -> int:
@@ -160,14 +211,24 @@ def main() -> int:
         print(dump(Bus(cartridge), args.dump, args.length))
         print("--- END ---\n")
     elif args.trace is not None:
+        executed = 0
+        total_cycles = 0
+        reason = f"reached the {args.trace} instruction limit"
+        exit_code = 0
+
         try:
-            for line in trace(Bus(cartridge), args.trace):
+            for line, cycles in trace(Bus(cartridge), args.trace):
                 print(line)
+                executed += 1
+                total_cycles += cycles
         except UnknownOpcodeError as error:
             # The expected stopping point, not a crash: report it the way the
             # other CLI errors are reported and leave the traceback out.
-            print(f"gameboy: {error}")
-            return 1
+            reason = str(error)
+            exit_code = 1
+
+        print(trace_summary(executed, total_cycles, reason))
+        return exit_code
     else:
         print(describe(cartridge))
 

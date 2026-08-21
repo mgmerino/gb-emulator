@@ -16,7 +16,8 @@ with the theory, the tasks and the acceptance criteria.
 | 04 | [CPU state & the fetch-decode-execute skeleton](docs/STEP_04.md) | done |
 | 05 | [Loads, the ALU and the flags](docs/STEP_05.md) | done |
 | 06 | [Jumps, calls and the stack](docs/STEP_06.md) | done |
-| 07 | [CB-prefixed opcodes: rotates, shifts and bit operations](docs/STEP_07.md) | next |
+| 07 | [CB-prefixed opcodes: rotates, shifts and bit operations](docs/STEP_07.md) | done |
+| 08 | Interrupts, `HALT`, `EI`/`DI` | next |
 
 ## Requirements
 
@@ -64,21 +65,37 @@ uv run python -m gameboy path/to/rom.gb --trace 3
 ```
 
 ```
-0100  00  NOP        A:01 F:B0 BC:0013 DE:00D8 HL:014D SP:FFFE  4
-0101  C3  JP a16     A:01 F:B0 BC:0013 DE:00D8 HL:014D SP:FFFE  16
-0150  C3  JP a16     A:01 F:B0 BC:0013 DE:00D8 HL:014D SP:FFFE  16
+0100  00     NOP           A:01 F:B0 BC:0013 DE:00D8 HL:014D SP:FFFE  4
+0101  C3     JP a16        A:01 F:B0 BC:0013 DE:00D8 HL:014D SP:FFFE  16
+0150  C3     JP a16        A:01 F:B0 BC:0013 DE:00D8 HL:014D SP:FFFE  16
+--- 3 instructions, 36 T-cycles, reached the 3 instruction limit ---
 ```
 
-Left to right: the address the opcode was fetched from, the opcode byte, the
+Left to right: the address the opcode was fetched from, the opcode bytes, the
 mnemonic, the register state after the instruction, and its cost in T-cycles.
-Two instructions are implemented so far, so the trace stops early with a non-zero
-exit code and a message naming the opcode and the address it was read from:
+CB-prefixed instructions occupy two opcode bytes and print both:
 
 ```
-gameboy: unknown opcode 0xAF at 0x020C
+0101  CB 07  RLC A         A:02 F:00 BC:0013 DE:00D8 HL:014D SP:FFFE  8
 ```
 
-That address is what you feed back to `--dump`.
+The summary line closes every run. Its cycle total is the clock everything else
+will be synchronised against from Step 09 onwards — one DMG frame is 70224
+T-cycles.
+
+The instruction set is complete except for the five opcodes that manipulate the
+interrupt master flag, so a real ROM now runs its whole boot sequence and stops
+when it reaches one of them — on Tetris, `0xF3` (`DI`) at `0x021D`. The trace
+ends there with a non-zero exit code, naming the opcode and the address the
+instruction began at:
+
+```
+021B  3E     LD A, d8      A:01 F:C0 BC:0000 DE:00D8 HL:CFFF SP:FFFE  8
+--- 12328 instructions, 98568 T-cycles, unknown opcode 0xF3 at 0x021D ---
+```
+
+That address is what you feed back to `--dump`. 98568 T-cycles is about 1.4
+frames, so the whole boot sequence is roughly 23 ms of Game Boy time.
 
 ## Development
 
