@@ -17,7 +17,7 @@ with the theory, the tasks and the acceptance criteria.
 | 05 | [Loads, the ALU and the flags](docs/STEP_05.md) | done |
 | 06 | [Jumps, calls and the stack](docs/STEP_06.md) | done |
 | 07 | [CB-prefixed opcodes: rotates, shifts and bit operations](docs/STEP_07.md) | done |
-| 08 | Interrupts, `HALT`, `EI`/`DI` | next |
+| 08 | [Interrupts, `HALT` and the master flag](docs/STEP_08.md) | next |
 
 ## Requirements
 
