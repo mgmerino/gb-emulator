@@ -2363,33 +2363,19 @@ def test_the_cb_prefix_is_not_an_instruction_of_its_own() -> None:
 
 
 def test_the_cb_prefix_decodes_from_the_second_table(cpu_running: CpuRunning) -> None:
-    # 0x40 is LD B, B in the base table, so raising at all proves CB_OPCODES
-    # was the table consulted. Delete in task 5: 0x40 becomes BIT 0, B.
-    cpu = cpu_running(0xCB, 0x40)
-
-    assert 0x40 in OPCODES
-
-    with pytest.raises(UnknownOpcodeError):
-        cpu.step()
-
-
-def test_the_cb_prefix_consumes_both_bytes(cpu_running: CpuRunning) -> None:
+    # 0x40 is LD B, B in the base table -- a copy that changes nothing at all.
+    # In the CB table it is BIT 0, B, which writes flags. The flags are the only
+    # thing that says which of the two tables was consulted.
     cpu = cpu_running(0xCB, 0x40, at=0x0100)
+    cpu.registers.b = 0x00
+    cpu.registers.f = 0x00
 
-    with pytest.raises(UnknownOpcodeError):
-        cpu.step()
+    cpu.step()
 
+    assert OPCODES[0x40].name == "LD B, B"
+    assert CB_OPCODES[0x40].name == "BIT 0, B"
+    assert cpu.registers.z_flag is True
     assert cpu.registers.pc == 0x0102
-
-
-def test_an_unknown_cb_opcode_reports_the_start_of_the_instruction(
-    cpu_running: CpuRunning,
-) -> None:
-    # 0x0100, not 0x0101: the instruction's first byte, matching the tracer.
-    cpu = cpu_running(0xCB, 0x40, at=0x0100)
-
-    with pytest.raises(UnknownOpcodeError, match="unknown opcode 0xCB at 0x0100"):
-        cpu.step()
 
 
 def test_an_unprefixed_opcode_still_decodes_from_the_base_table(
@@ -2544,3 +2530,206 @@ def test_rl_reads_the_carry_flag_out_of_the_registers(cpu_running: CpuRunning) -
 
     assert cpu.registers.b == 0x01
     assert cpu.registers.c_flag is False
+
+
+#
+#  --- CB BIT, RES AND SET ---
+#
+
+# 01 bbb rrr is BIT, 10 bbb rrr is RES, 11 bbb rrr is SET: the bit index in bits
+# 5 to 3, the operand in bits 2 to 0.
+CB_BIT_BLOCK = [
+    (opcode, (opcode >> 3) & 0b111, Operand(opcode & 0b111))
+    for opcode in range(0x40, 0x80)
+]
+CB_WRITE_BACK_BLOCK = [
+    (opcode, (opcode >> 3) & 0b111, Operand(opcode & 0b111))
+    for opcode in range(0x80, 0x100)
+]
+
+
+def test_the_cb_table_is_complete() -> None:
+    # The only table in the project with no holes: 256 defined, no illegal
+    # opcodes, so no CB opcode can ever be unknown.
+    assert CB_OPCODES.keys() == set(range(0x100))
+
+
+@pytest.mark.parametrize(
+    "opcode, name",
+    [
+        (0x40, "BIT 0, B"),
+        (0x46, "BIT 0, (HL)"),
+        (0x7E, "BIT 7, (HL)"),
+        (0x7F, "BIT 7, A"),
+        (0x80, "RES 0, B"),
+        (0xBE, "RES 7, (HL)"),
+        (0xC0, "SET 0, B"),
+        (0xFF, "SET 7, A"),
+    ],
+)
+def test_the_bit_families_decode_their_index_and_operand(
+    opcode: int, name: str
+) -> None:
+    assert CB_OPCODES[opcode].name == name
+
+
+@pytest.mark.parametrize(
+    "family, base",
+    [("BIT", 0x40), ("RES", 0x80), ("SET", 0xC0)],
+)
+def test_the_bit_families_decode_all_eight_indices(family: str, base: int) -> None:
+    for bit in range(8):
+        assert CB_OPCODES[base + bit * 8].name == f"{family} {bit}, B"
+
+
+@pytest.mark.parametrize(
+    "opcode, bit, operand",
+    CB_BIT_BLOCK,
+    ids=[f"{opcode:#04x}" for opcode, _, _ in CB_BIT_BLOCK],
+)
+def test_bit_costs_twelve_on_hl_because_it_never_writes_back(
+    opcode: int, bit: int, operand: Operand
+) -> None:
+    assert CB_OPCODES[opcode].cycles == count_cycles(operand, prefixed=True)
+    assert CB_OPCODES[opcode].cycles == (12 if operand is Operand.HL_POINTER else 8)
+
+
+@pytest.mark.parametrize(
+    "opcode, bit, operand",
+    CB_WRITE_BACK_BLOCK,
+    ids=[f"{opcode:#04x}" for opcode, _, _ in CB_WRITE_BACK_BLOCK],
+)
+def test_res_and_set_cycle_costs_follow_the_access_rule(
+    opcode: int, bit: int, operand: Operand
+) -> None:
+    assert CB_OPCODES[opcode].cycles == count_cycles(operand, operand, prefixed=True)
+    assert CB_OPCODES[opcode].cycles == (16 if operand is Operand.HL_POINTER else 8)
+
+
+# BIT: Z is the *inverse* of the tested bit, N is cleared, H is set, C is left
+# exactly as it was.
+
+
+@pytest.mark.parametrize(
+    "value, expected_z",
+    [(0x00, True), (0x80, False)],
+    ids=["bit clear", "bit set"],
+)
+def test_bit_sets_zero_when_the_tested_bit_is_clear(
+    cpu_running: CpuRunning, value: int, expected_z: bool
+) -> None:
+    cpu = cpu_running(0xCB, 0x78)  # BIT 7, B
+    cpu.registers.b = value
+
+    cpu.step()
+
+    assert cpu.registers.z_flag is expected_z
+
+
+@pytest.mark.parametrize("carry", [False, True], ids=["c=0", "c=1"])
+def test_bit_leaves_the_carry_alone(cpu_running: CpuRunning, carry: bool) -> None:
+    cpu = cpu_running(0xCB, 0x40)  # BIT 0, B
+    cpu.registers.b = 0x01
+    cpu.registers.c_flag = carry
+
+    cpu.step()
+
+    assert cpu.registers.c_flag is carry
+
+
+def test_bit_sets_the_half_carry_and_clears_n(cpu_running: CpuRunning) -> None:
+    cpu = cpu_running(0xCB, 0x40)  # BIT 0, B
+    cpu.registers.b = 0x01
+    cpu.registers.n_flag = True
+    cpu.registers.h_flag = False
+
+    cpu.step()
+
+    assert cpu.registers.h_flag is True
+    assert cpu.registers.n_flag is False
+
+
+def test_bit_does_not_write_its_operand(cpu_running: CpuRunning) -> None:
+    # 0xFF masked down to bit 0 would be 0x01, so writing the result back is
+    # visible here and invisible with a value that already equals its mask.
+    cpu = cpu_running(0xCB, 0x40)  # BIT 0, B
+    cpu.registers.b = 0xFF
+
+    cpu.step()
+
+    assert cpu.registers.b == 0xFF
+
+
+def test_bit_on_hl_pointer_reads_without_writing(cpu_running: CpuRunning) -> None:
+    cpu = cpu_running(0xCB, 0x7E)  # BIT 7, (HL)
+    cpu.registers.hl = 0xC000
+    cpu.bus.write(0xC000, 0xFF)
+
+    cycles = cpu.step()
+
+    assert cpu.bus.read(0xC000) == 0xFF
+    assert cpu.registers.z_flag is False
+    assert cycles == 12
+
+
+# RES and SET write the operand back and touch no flag at all.
+
+
+def test_res_clears_only_the_bit_its_opcode_names(cpu_running: CpuRunning) -> None:
+    cpu = cpu_running(0xCB, 0xB8)  # RES 7, B
+    cpu.registers.b = 0xFF
+
+    cpu.step()
+
+    assert cpu.registers.b == 0x7F
+
+
+def test_set_sets_only_the_bit_its_opcode_names(cpu_running: CpuRunning) -> None:
+    cpu = cpu_running(0xCB, 0xF8)  # SET 7, B
+    cpu.registers.b = 0x00
+
+    cpu.step()
+
+    assert cpu.registers.b == 0x80
+
+
+@pytest.mark.parametrize("opcode", [0xB8, 0xF8], ids=["RES 7, B", "SET 7, B"])
+def test_res_and_set_write_no_flags(cpu_running: CpuRunning, opcode: int) -> None:
+    cpu = cpu_running(0xCB, opcode)
+    cpu.registers.b = 0x0F
+    cpu.registers.f = 0xF0
+
+    cpu.step()
+
+    assert cpu.registers.f == 0xF0
+
+
+def test_set_on_hl_pointer_writes_back_through_the_bus(
+    cpu_running: CpuRunning,
+) -> None:
+    cpu = cpu_running(0xCB, 0xFE)  # SET 7, (HL)
+    cpu.registers.hl = 0xC000
+    cpu.bus.write(0xC000, 0x00)
+
+    cycles = cpu.step()
+
+    assert cpu.bus.read(0xC000) == 0x80
+    assert cpu.registers.hl == 0xC000
+    assert cycles == 16
+
+
+def test_the_bit_families_bind_one_index_per_entry(cpu_running: CpuRunning) -> None:
+    # Two entries of the same family, differing only in the bit field.
+    cpu = cpu_running(0xCB, 0xC0)  # SET 0, B
+    cpu.registers.b = 0x00
+
+    cpu.step()
+
+    assert cpu.registers.b == 0x01
+
+    cpu = cpu_running(0xCB, 0xF8)  # SET 7, B
+    cpu.registers.b = 0x00
+
+    cpu.step()
+
+    assert cpu.registers.b == 0x80

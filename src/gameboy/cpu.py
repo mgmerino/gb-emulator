@@ -38,7 +38,17 @@ from gameboy.alu import (
     swap,
     xor,
 )
-from gameboy.bits import get_bit, high_byte, join_bytes, low_byte, to_signed8, u8, u16
+from gameboy.bits import (
+    clear_bit,
+    get_bit,
+    high_byte,
+    join_bytes,
+    low_byte,
+    set_bit,
+    to_signed8,
+    u8,
+    u16,
+)
 from gameboy.memory import MemoryDevice
 
 # Since masking is _expected_ to be executed from the top layer, we want to ensure
@@ -1255,6 +1265,98 @@ def _shift_block() -> dict[int, Instruction]:
     return instructions
 
 
+# --------------------
+# CB BIT, RES and SET
+# --------------------
+#
+#
+# | Range         | Bits       | Family   |
+# | ------------- | ---------- | -------- |
+# | 0x40 - 0x7F   | 01 bbb rrr | BIT b, r |
+# | 0x80 - 0xBF   | 10 bbb rrr | RES b, r |
+# | 0xC0 - 0xFF   | 11 bbb rrr | SET b, r |
+#
+# rrr: 000 B, 001 C, 010 D, 011 E, 100 H, 101 L, 110 (HL), 111 A
+# bbb: 0 to 7, counting from the LSB.
+#
+# So the opcode is base + bit * 8 + operand:
+#
+#   BIT 7, (HL)  =  0x40 + 7*8 + 6  =  0x7E
+#   RES 3, A     =  0x80 + 3*8 + 7  =  0x9F
+#   SET 0, B     =  0xC0 + 0*8 + 0  =  0xC0
+#
+# | Family | Effect                  | Z         | N | H | C    | r | (HL) |
+# | ------ | ----------------------- | --------- | - | - | ---- | - | ---- |
+# | BIT    | test bit b, discard it  | NOT bit b | 0 | 1 | kept | 8 | 12   |
+# | RES    | value AND NOT (1 << b)  | -         | - | - | -    | 8 | 16   |
+# | SET    | value OR (1 << b)       | -         | - | - | -    | 8 | 16   |
+#
+
+
+def _make_bit(operand: Operand, index: int) -> Callable[[CPU], None]:
+    def execute(cpu: CPU) -> None:
+        value = read_operand(cpu, operand)
+        bit = get_bit(value, index)
+        cpu.registers.apply(Flags(z=not bit, n=False, h=True))
+
+    return execute
+
+
+def _make_res(operand: Operand, index: int) -> Callable[[CPU], None]:
+    def execute(cpu: CPU) -> None:
+        value = read_operand(cpu, operand)
+        write_operand(cpu, operand, clear_bit(value, index))
+
+    return execute
+
+
+def _make_set(operand: Operand, index: int) -> Callable[[CPU], None]:
+    def execute(cpu: CPU) -> None:
+        value = read_operand(cpu, operand)
+        write_operand(cpu, operand, set_bit(value, index))
+
+    return execute
+
+
+def _bit_res_set_block() -> dict[int, Instruction]:
+    instructions: dict[int, Instruction] = {}
+
+    # BIT block
+    for opcode in range(0x40, 0x80):
+        operand = Operand(opcode & 0b111)
+        bit_index = (opcode >> 3) & 0b111
+
+        instructions[opcode] = Instruction(
+            f"BIT {bit_index}, {operand.assembly_name}",
+            count_cycles(operand, prefixed=True),
+            _make_bit(operand, bit_index),
+        )
+
+    # RES block
+    for opcode in range(0x80, 0xC0):
+        operand = Operand(opcode & 0b111)
+        bit_index = (opcode >> 3) & 0b111
+
+        instructions[opcode] = Instruction(
+            f"RES {bit_index}, {operand.assembly_name}",
+            count_cycles(operand, operand, prefixed=True),
+            _make_res(operand, bit_index),
+        )
+
+    # SET block
+    for opcode in range(0xC0, 0x100):
+        operand = Operand(opcode & 0b111)
+        bit_index = (opcode >> 3) & 0b111
+
+        instructions[opcode] = Instruction(
+            f"SET {bit_index}, {operand.assembly_name}",
+            count_cycles(operand, operand, prefixed=True),
+            _make_set(operand, bit_index),
+        )
+
+    return instructions
+
+
 OPCODES: Final[dict[int, Instruction]] = {
     0x00: Instruction("NOP", 4, _nop),
     0xC3: Instruction("JP a16", 16, _jp_a16),
@@ -1333,4 +1435,5 @@ OPCODES: Final[dict[int, Instruction]] = {
 # Cycle counts here include the prefix fetch.
 CB_OPCODES: Final[dict[int, Instruction]] = {
     **_shift_block(),
+    **_bit_res_set_block(),
 }
