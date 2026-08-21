@@ -26,8 +26,16 @@ from gameboy.alu import (
     dec,
     inc,
     or_,
+    rl,
+    rlc,
+    rr,
+    rrc,
     sbc,
+    sla,
+    sra,
+    srl,
     sub,
+    swap,
     xor,
 )
 from gameboy.bits import get_bit, high_byte, join_bytes, low_byte, to_signed8, u8, u16
@@ -186,6 +194,12 @@ class AluOperation:
     name: str
     apply: Callable[[int, int, bool], tuple[int, Flags]]
     writes_result: bool
+
+
+@dataclass(frozen=True, slots=True)
+class ShiftOperation:
+    name: str
+    apply: Callable[[int, bool], tuple[int, Flags]]
 
 
 @dataclass
@@ -807,12 +821,24 @@ def _ccf(cpu: CPU) -> None:
     cpu.registers.apply(Flags(n=False, h=False, c=not cpu.registers.c_flag))
 
 
+# ------------------
+# JR - relative jumps
+# ------------------
 #
-# --- JR, JP, CALL/RST, RET
+# | Opcodes             | Instruction | Cycles  | Flags |
+# | ------------------- | ----------- | ------- | ----- |
+# | 0x18                | JR e8       | 12      | none  |
+# | 0x20 0x28 0x30 0x38 | JR cc, e8   | 12 / 8  | none  |
 #
-
-# JR: jump relative to address. The offset is relative to the address of the
-# instruction *after* the `JR`
+# The offset is signed, and relative to the address of the instruction *after*
+# the JR. Fetching the operand already moved PC there, so there is no
+# correction term.
+#
+# cc is bits 4 and 3: 00 NZ, 01 Z, 10 NC, 11 C. Same field in all four
+# conditional families.
+#
+# The operand is fetched whether or not the branch is taken. A body that
+# returns early leaves PC pointing at an operand byte.
 
 
 def _jr_e8(cpu: CPU) -> None:
@@ -856,6 +882,23 @@ def _jr_c_e8(cpu: CPU) -> bool:
     return False
 
 
+# ------------------
+# JP - absolute jumps
+# ------------------
+#
+# | Opcodes             | Instruction | Cycles  | Flags |
+# | ------------------- | ----------- | ------- | ----- |
+# | 0xC3                | JP a16      | 16      | none  |
+# | 0xC2 0xCA 0xD2 0xDA | JP cc, a16  | 16 / 12 | none  |
+# | 0xE9                | JP HL       | 4       | none  |
+#
+# 0xC3's body lives with the Step 04 code near the top of the file.
+#
+# JP HL reads no memory: it copies HL into PC. The 4 cycles are the proof, one
+# fetch and no access. Tables that print it as `JP (HL)` are lying; it is how
+# you implement a jump table.
+
+
 def _jp_hl(cpu: CPU) -> None:
     address = cpu.registers.hl
     cpu.registers.pc = address
@@ -895,6 +938,22 @@ def _jp_c_a16(cpu: CPU) -> bool:
         return True
 
     return False
+
+
+# -------------------------
+# CALL - call a subroutine
+# -------------------------
+#
+# | Opcodes             | Instruction  | Cycles  | Flags |
+# | ------------------- | ------------ | ------- | ----- |
+# | 0xCD                | CALL a16     | 24      | none  |
+# | 0xC4 0xCC 0xD4 0xDC | CALL cc, a16 | 24 / 12 | none  |
+#
+# The return address is never computed. Fetching the operand already left PC
+# past the instruction, so pushing PC is the whole of it.
+#
+# 24 cycles for five memory accesses: the extra machine cycle is the 16-bit
+# decrement of SP, the same one PUSH pays for.
 
 
 def _call_a16(cpu: CPU) -> None:
@@ -943,6 +1002,22 @@ def _call_c_a16(cpu: CPU) -> bool:
     return False
 
 
+# ------------------------------
+# RET - return from a subroutine
+# ------------------------------
+#
+# | Opcodes             | Instruction | Cycles | Flags |
+# | ------------------- | ----------- | ------ | ----- |
+# | 0xC9                | RET         | 16     | none  |
+# | 0xC0 0xC8 0xD0 0xD8 | RET cc      | 20 / 8 | none  |
+#
+# RET cc costs 20 taken against RET's 16 with identical memory accesses. That
+# extra machine cycle is the condition test itself.
+#
+# RETI (0xD9) is deliberately absent: it re-enables interrupts, which do not
+# exist until Step 08.
+
+
 def _ret(cpu: CPU) -> None:
     cpu.registers.pc = cpu.pop16()
 
@@ -977,6 +1052,27 @@ def _ret_c(cpu: CPU) -> bool:
         return True
 
     return False
+
+
+# -------------
+# PUSH and POP
+# -------------
+#
+# | Opcodes             | Instruction      | Cycles | Flags       |
+# | ------------------- | ---------------- | ------ | ----------- |
+# | 0xC5 0xD5 0xE5 0xF5 | PUSH BC/DE/HL/AF | 16     | none        |
+# | 0xC1 0xD1 0xE1 0xF1 | POP BC/DE/HL/AF  | 12     | POP AF only |
+#
+# The pair index sits in bits 5 and 4, the same field as the 16-bit block --
+# but 0b11 means AF here and SP there. That is why StackPair exists next to
+# RegisterPair rather than reusing it.
+#
+# PUSH costs 16 against POP's 12 with the same three accesses: the difference
+# is the 16-bit decrement of SP.
+#
+# POP AF writes F, whose low nibble does not exist in hardware. Popping 0x1234
+# leaves F at 0x30. The four booleans behind the `f` property give that for
+# free.
 
 
 def _push_bc(cpu: CPU) -> None:
@@ -1017,6 +1113,28 @@ def _pop_hl(cpu: CPU) -> None:
 def _pop_af(cpu: CPU) -> None:
     value = cpu.pop16()
     write_stack_pair(cpu, StackPair.AF, value)
+
+
+# -----------------------------------
+# RST - one-byte calls to a fixed page
+# -----------------------------------
+#
+# Encoded 11 ttt 111, target is ttt * 8. All eight cost 16 and touch no flags.
+#
+# | Opcode | Target | Opcode | Target |
+# | ------ | ------ | ------ | ------ |
+# | 0xC7   | 0x0000 | 0xE7   | 0x0020 |
+# | 0xCF   | 0x0008 | 0xEF   | 0x0028 |
+# | 0xD7   | 0x0010 | 0xF7   | 0x0030 |
+# | 0xDF   | 0x0018 | 0xFF   | 0x0038 |
+#
+# One byte instead of three, so a routine called from hundreds of places costs
+# a third of the ROM space. Not to be confused with the interrupt vectors at
+# 0x40..0x60 in Step 08: two different tables that live near each other.
+#
+# 0xFF is RST 0x38, and unmapped memory reads as 0xFF. A trace that turns into
+# an endless RST 0x38 is not a bug in RST -- it is evidence that a jump went
+# wrong several instructions earlier.
 
 
 def _rst_00(cpu: CPU) -> None:
@@ -1079,6 +1197,62 @@ def _ld_hl_sp_e8(cpu: CPU) -> None:
 
 def _ld_sp_hl(cpu: CPU) -> None:
     cpu.registers.sp = cpu.registers.hl
+
+
+#
+# --- ROTATE/SHIFT BLOCK
+#
+# 00 ooo rrr
+#    |   └── Operand:   (opcode & 0b111)
+#    └────── Operation: (opcode >> 3) & 0b111
+# ┌─────┬─────┬─────┬──────┐
+# │ ooo │     │ ooo │      │
+# ├─────┼─────┼─────┼──────┤
+# │ 000 │ RLC │ 100 │ SLA  │
+# ├─────┼─────┼─────┼──────┤
+# │ 001 │ RRC │ 101 │ SRA  │
+# ├─────┼─────┼─────┼──────┤
+# │ 010 │ RL  │ 110 │ SWAP │
+# ├─────┼─────┼─────┼──────┤
+# │ 011 │ RR  │ 111 │ SRL  │
+# └─────┴─────┴─────┴──────┘
+
+
+_SHIFT_OPERATIONS: Final[tuple[ShiftOperation, ...]] = (
+    ShiftOperation("RLC", lambda a, _carry: rlc(a)),
+    ShiftOperation("RRC", lambda a, _carry: rrc(a)),
+    ShiftOperation("RL", rl),
+    ShiftOperation("RR", rr),
+    ShiftOperation("SLA", lambda a, _carry: sla(a)),
+    ShiftOperation("SRA", lambda a, _carry: sra(a)),
+    ShiftOperation("SWAP", lambda a, _carry: swap(a)),
+    ShiftOperation("SRL", lambda a, _carry: srl(a)),
+)
+
+
+def _make_shift(operand: Operand, operation: ShiftOperation) -> Callable[[CPU], None]:
+    def execute(cpu: CPU) -> None:
+        value = read_operand(cpu, operand)
+        result, flags = operation.apply(value, cpu.registers.c_flag)
+        cpu.registers.apply(flags)
+        write_operand(cpu, operand, result)
+
+    return execute
+
+
+def _shift_block() -> dict[int, Instruction]:
+    instructions: dict[int, Instruction] = {}
+    for opcode in range(0x40):
+        operation = _SHIFT_OPERATIONS[(opcode >> 3) & 0b111]
+        operand = Operand(opcode & 0b111)
+
+        instructions[opcode] = Instruction(
+            f"{operation.name} {operand.assembly_name}",
+            count_cycles(operand, operand, prefixed=True),
+            _make_shift(operand, operation),
+        )
+
+    return instructions
 
 
 OPCODES: Final[dict[int, Instruction]] = {
@@ -1154,4 +1328,9 @@ OPCODES: Final[dict[int, Instruction]] = {
     0xF9: Instruction("LD SP, HL", 8, _ld_sp_hl),
 }
 
-CB_OPCODES: Final[dict[int, Instruction]] = {}
+# The CB-prefixed table, the 0xCB escape in `step()`.
+#
+# Cycle counts here include the prefix fetch.
+CB_OPCODES: Final[dict[int, Instruction]] = {
+    **_shift_block(),
+}
