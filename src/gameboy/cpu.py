@@ -26,8 +26,16 @@ from gameboy.alu import (
     dec,
     inc,
     or_,
+    rl,
+    rlc,
+    rr,
+    rrc,
     sbc,
+    sla,
+    sra,
+    srl,
     sub,
+    swap,
     xor,
 )
 from gameboy.bits import get_bit, high_byte, join_bytes, low_byte, to_signed8, u8, u16
@@ -186,6 +194,12 @@ class AluOperation:
     name: str
     apply: Callable[[int, int, bool], tuple[int, Flags]]
     writes_result: bool
+
+
+@dataclass(frozen=True, slots=True)
+class ShiftOperation:
+    name: str
+    apply: Callable[[int, bool], tuple[int, Flags]]
 
 
 @dataclass
@@ -1185,6 +1199,62 @@ def _ld_sp_hl(cpu: CPU) -> None:
     cpu.registers.sp = cpu.registers.hl
 
 
+#
+# --- ROTATE/SHIFT BLOCK
+#
+# 00 ooo rrr
+#    |   └── Operand:   (opcode & 0b111)
+#    └────── Operation: (opcode >> 3) & 0b111
+# ┌─────┬─────┬─────┬──────┐
+# │ ooo │     │ ooo │      │
+# ├─────┼─────┼─────┼──────┤
+# │ 000 │ RLC │ 100 │ SLA  │
+# ├─────┼─────┼─────┼──────┤
+# │ 001 │ RRC │ 101 │ SRA  │
+# ├─────┼─────┼─────┼──────┤
+# │ 010 │ RL  │ 110 │ SWAP │
+# ├─────┼─────┼─────┼──────┤
+# │ 011 │ RR  │ 111 │ SRL  │
+# └─────┴─────┴─────┴──────┘
+
+
+_SHIFT_OPERATIONS: Final[tuple[ShiftOperation, ...]] = (
+    ShiftOperation("RLC", lambda a, _carry: rlc(a)),
+    ShiftOperation("RRC", lambda a, _carry: rrc(a)),
+    ShiftOperation("RL", rl),
+    ShiftOperation("RR", rr),
+    ShiftOperation("SLA", lambda a, _carry: sla(a)),
+    ShiftOperation("SRA", lambda a, _carry: sra(a)),
+    ShiftOperation("SWAP", lambda a, _carry: swap(a)),
+    ShiftOperation("SRL", lambda a, _carry: srl(a)),
+)
+
+
+def _make_shift(operand: Operand, operation: ShiftOperation) -> Callable[[CPU], None]:
+    def execute(cpu: CPU) -> None:
+        value = read_operand(cpu, operand)
+        result, flags = operation.apply(value, cpu.registers.c_flag)
+        cpu.registers.apply(flags)
+        write_operand(cpu, operand, result)
+
+    return execute
+
+
+def _shift_block() -> dict[int, Instruction]:
+    instructions: dict[int, Instruction] = {}
+    for opcode in range(0x40):
+        operation = _SHIFT_OPERATIONS[(opcode >> 3) & 0b111]
+        operand = Operand(opcode & 0b111)
+
+        instructions[opcode] = Instruction(
+            f"{operation.name} {operand.assembly_name}",
+            count_cycles(operand, operand, prefixed=True),
+            _make_shift(operand, operation),
+        )
+
+    return instructions
+
+
 OPCODES: Final[dict[int, Instruction]] = {
     0x00: Instruction("NOP", 4, _nop),
     0xC3: Instruction("JP a16", 16, _jp_a16),
@@ -1258,4 +1328,9 @@ OPCODES: Final[dict[int, Instruction]] = {
     0xF9: Instruction("LD SP, HL", 8, _ld_sp_hl),
 }
 
-CB_OPCODES: Final[dict[int, Instruction]] = {}
+# The CB-prefixed table, the 0xCB escape in `step()`.
+#
+# Cycle counts here include the prefix fetch.
+CB_OPCODES: Final[dict[int, Instruction]] = {
+    **_shift_block(),
+}

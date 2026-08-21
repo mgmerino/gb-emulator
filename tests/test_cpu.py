@@ -3,6 +3,7 @@ from conftest import CpuRunning
 
 from gameboy.alu import Flags
 from gameboy.cpu import (
+    CB_OPCODES,
     OPCODES,
     Operand,
     RegisterPair,
@@ -2362,19 +2363,18 @@ def test_the_cb_prefix_is_not_an_instruction_of_its_own() -> None:
 
 
 def test_the_cb_prefix_decodes_from_the_second_table(cpu_running: CpuRunning) -> None:
-    # 0x00 is NOP in the base table, so raising at all proves CB_OPCODES was the
-    # table consulted. Delete once that table is complete: 0xCB 0x00 becomes
-    # RLC B and stops raising.
-    cpu = cpu_running(0xCB, 0x00)
+    # 0x40 is LD B, B in the base table, so raising at all proves CB_OPCODES
+    # was the table consulted. Delete in task 5: 0x40 becomes BIT 0, B.
+    cpu = cpu_running(0xCB, 0x40)
 
-    assert 0x00 in OPCODES
+    assert 0x40 in OPCODES
 
     with pytest.raises(UnknownOpcodeError):
         cpu.step()
 
 
 def test_the_cb_prefix_consumes_both_bytes(cpu_running: CpuRunning) -> None:
-    cpu = cpu_running(0xCB, 0x00, at=0x0100)
+    cpu = cpu_running(0xCB, 0x40, at=0x0100)
 
     with pytest.raises(UnknownOpcodeError):
         cpu.step()
@@ -2386,7 +2386,7 @@ def test_an_unknown_cb_opcode_reports_the_start_of_the_instruction(
     cpu_running: CpuRunning,
 ) -> None:
     # 0x0100, not 0x0101: the instruction's first byte, matching the tracer.
-    cpu = cpu_running(0xCB, 0x00, at=0x0100)
+    cpu = cpu_running(0xCB, 0x40, at=0x0100)
 
     with pytest.raises(UnknownOpcodeError, match="unknown opcode 0xCB at 0x0100"):
         cpu.step()
@@ -2399,3 +2399,148 @@ def test_an_unprefixed_opcode_still_decodes_from_the_base_table(
 
     assert cpu.step() == 4
     assert cpu.registers.pc == 0x0101
+
+
+#
+#  --- CB SHIFT BLOCK ---
+#
+
+# 00 ooo rrr: the operation index in bits 5 to 3, the operand in bits 2 to 0.
+CB_SHIFT_BLOCK = [(opcode, Operand(opcode & 0b111)) for opcode in range(0x40)]
+
+# One row per operation index, all against B. The encoding order is fixed by the
+# hardware and does not follow alu.py's grouping by direction.
+CB_SHIFT_OPERATIONS: list[tuple[int, str]] = [
+    (0x00, "RLC"),
+    (0x08, "RRC"),
+    (0x10, "RL"),
+    (0x18, "RR"),
+    (0x20, "SLA"),
+    (0x28, "SRA"),
+    (0x30, "SWAP"),
+    (0x38, "SRL"),
+]
+
+
+def test_the_cb_shift_block_covers_every_opcode() -> None:
+    block = set(range(0x40))
+
+    assert CB_OPCODES.keys() & block == block
+
+
+@pytest.mark.parametrize(
+    "opcode, name",
+    CB_SHIFT_OPERATIONS,
+    ids=[name for _, name in CB_SHIFT_OPERATIONS],
+)
+def test_the_cb_shift_block_names_each_operation_index(opcode: int, name: str) -> None:
+    assert CB_OPCODES[opcode].name == f"{name} B"
+
+
+@pytest.mark.parametrize(
+    "opcode, name",
+    [
+        (0x00, "RLC B"),
+        (0x06, "RLC (HL)"),
+        (0x0F, "RRC A"),
+        (0x30, "SWAP B"),
+        (0x36, "SWAP (HL)"),
+        (0x3F, "SRL A"),
+    ],
+)
+def test_the_cb_shift_block_decodes_its_operand(opcode: int, name: str) -> None:
+    assert CB_OPCODES[opcode].name == name
+
+
+@pytest.mark.parametrize(
+    "opcode, operand",
+    CB_SHIFT_BLOCK,
+    ids=[f"{opcode:#04x}" for opcode, _ in CB_SHIFT_BLOCK],
+)
+def test_the_cb_shift_block_cycle_costs_follow_the_access_rule(
+    opcode: int, operand: Operand
+) -> None:
+    assert CB_OPCODES[opcode].cycles == count_cycles(operand, operand, prefixed=True)
+    assert CB_OPCODES[opcode].cycles == (16 if operand is Operand.HL_POINTER else 8)
+
+
+def test_the_cb_shift_block_binds_one_operand_per_entry(
+    cpu_running: CpuRunning,
+) -> None:
+    # RLC 0x80 is 0x01
+    cpu = cpu_running(0xCB, 0x00)  # RLC B
+    cpu.registers.b = 0x80
+    cpu.registers.c = 0x80
+
+    cpu.step()
+
+    assert (cpu.registers.b, cpu.registers.c) == (0x01, 0x80)
+
+    cpu = cpu_running(0xCB, 0x01)  # RLC C
+    cpu.registers.b = 0x80
+    cpu.registers.c = 0x80
+
+    cpu.step()
+
+    assert (cpu.registers.b, cpu.registers.c) == (0x80, 0x01)
+
+
+@pytest.mark.parametrize(
+    "operand", REGISTER_OPERANDS, ids=[operand.name for operand in REGISTER_OPERANDS]
+)
+def test_a_shift_reads_and_writes_the_operand_its_opcode_names(
+    cpu_running: CpuRunning, operand: Operand
+) -> None:
+    cpu = cpu_running(0xCB, 0x30 + operand)  # SWAP operand
+    write_operand(cpu, operand, 0x4B)
+
+    cycles = cpu.step()
+
+    assert read_operand(cpu, operand) == 0xB4
+    assert cycles == 8
+    assert cpu.registers.pc == 0x0102
+
+
+def test_a_shift_on_hl_pointer_writes_back_through_the_bus(
+    cpu_running: CpuRunning,
+) -> None:
+    cpu = cpu_running(0xCB, 0x36)  # SWAP (HL)
+    cpu.registers.hl = 0xC000
+    cpu.bus.write(0xC000, 0x4B)
+
+    cycles = cpu.step()
+
+    assert cpu.bus.read(0xC000) == 0xB4
+    assert cpu.registers.hl == 0xC000
+    assert cycles == 16
+
+
+@pytest.mark.parametrize(
+    "value, expected, expected_f",
+    [
+        (0x80, 0x00, 0x90),  # lands on zero, and bit 7 left: Z and C
+        (0x01, 0x02, 0x00),  # nothing set
+    ],
+    ids=["0x80", "0x01"],
+)
+def test_a_shift_applies_its_flags_to_the_registers(
+    cpu_running: CpuRunning, value: int, expected: int, expected_f: int
+) -> None:
+    cpu = cpu_running(0xCB, 0x20)  # SLA B
+    cpu.registers.b = value
+
+    cpu.step()
+
+    assert cpu.registers.b == expected
+    assert cpu.registers.f == expected_f
+
+
+def test_rl_reads_the_carry_flag_out_of_the_registers(cpu_running: CpuRunning) -> None:
+    cpu = cpu_running(0xCB, 0x10)  # RL B
+    cpu.registers.b = 0x00
+    cpu.registers.c_flag = True
+
+    cpu.step()
+
+    assert cpu.registers.b == 0x01
+    assert cpu.registers.c_flag is False
