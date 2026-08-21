@@ -11,14 +11,9 @@ from gameboy.cartridge import (
     compute_global_checksum,
     compute_header_checksum,
 )
-from gameboy.cpu import (
-    CB_OPCODES,
-    CPU,
-    OPCODES,
-    Instruction,
-    Registers,
-    UnknownOpcodeError,
-)
+from gameboy.cpu import CPU, Registers, UnknownOpcodeError
+from gameboy.encoding import Instruction
+from gameboy.instructions import CB_OPCODES, OPCODES
 from gameboy.memory import Bus, MemoryDevice
 
 type Row = tuple[int, int, str]

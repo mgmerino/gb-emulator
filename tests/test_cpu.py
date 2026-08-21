@@ -2,19 +2,16 @@ import pytest
 from conftest import CpuRunning
 
 from gameboy.alu import Flags
-from gameboy.cpu import (
-    CB_OPCODES,
-    OPCODES,
+from gameboy.cpu import Registers, UnknownOpcodeError
+from gameboy.encoding import (
     Operand,
     RegisterPair,
-    Registers,
-    UnknownOpcodeError,
-    count_cycles,
     read_operand,
     read_pair,
     write_operand,
     write_pair,
 )
+from gameboy.instructions import CB_OPCODES, OPCODES, count_cycles
 
 REGISTER_OPERANDS = [
     Operand.B,
