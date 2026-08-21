@@ -143,8 +143,20 @@ def trace_line(
     )
 
 
-def trace(bus: MemoryDevice, instructions: int) -> Iterator[str]:
-    """Run the machine for `instructions` steps, yielding one line each."""
+def trace_summary(instructions: int, cycles: int, reason: str) -> str:
+    """One DMG frame is 70224 T-cycles, which is the yardstick this number is
+    read against.
+    """
+    return f"--- {instructions} instructions, {cycles} T-cycles, {reason} ---"
+
+
+def trace(bus: MemoryDevice, instructions: int) -> Iterator[tuple[str, int]]:
+    """Run the machine for `instructions` steps, yielding a line and its cost.
+
+    The caller sums the cycles rather than the generator tracking them: a
+    generator that stops early through an exception cannot report a total, and
+    the loop that consumes it can.
+    """
     cpu = CPU(bus, Registers.post_boot())
 
     for _ in range(instructions):
@@ -159,11 +171,14 @@ def trace(bus: MemoryDevice, instructions: int) -> Iterator[str]:
         # step itself needs `.get`.
         instruction, size = decode(bus, address)
 
-        yield trace_line(
-            address,
-            opcode_bytes(bus, address, size),
-            instruction.name,
-            cpu.registers,
+        yield (
+            trace_line(
+                address,
+                opcode_bytes(bus, address, size),
+                instruction.name,
+                cpu.registers,
+                cycles,
+            ),
             cycles,
         )
 
@@ -196,14 +211,24 @@ def main() -> int:
         print(dump(Bus(cartridge), args.dump, args.length))
         print("--- END ---\n")
     elif args.trace is not None:
+        executed = 0
+        total_cycles = 0
+        reason = f"reached the {args.trace} instruction limit"
+        exit_code = 0
+
         try:
-            for line in trace(Bus(cartridge), args.trace):
+            for line, cycles in trace(Bus(cartridge), args.trace):
                 print(line)
+                executed += 1
+                total_cycles += cycles
         except UnknownOpcodeError as error:
             # The expected stopping point, not a crash: report it the way the
             # other CLI errors are reported and leave the traceback out.
-            print(f"gameboy: {error}")
-            return 1
+            reason = str(error)
+            exit_code = 1
+
+        print(trace_summary(executed, total_cycles, reason))
+        return exit_code
     else:
         print(describe(cartridge))
 
