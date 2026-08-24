@@ -2428,11 +2428,10 @@ def test_rla_and_rra_bring_the_incoming_carry_into_the_vacated_end(
     assert cpu.registers.c_flag is False
 
 
-def test_the_base_table_is_complete_but_for_step_08_and_the_illegal_opcodes() -> None:
+def test_the_base_table_is_complete_but_for_illegal_opcodes() -> None:
     # These are the missing opcodes to finish the base table:
-    step_08 = {0x10}  # STOP
     illegal = {0xD3, 0xDB, 0xDD, 0xE3, 0xE4, 0xEB, 0xEC, 0xED, 0xF4, 0xFC, 0xFD}
 
-    assert OPCODES.keys() == set(range(0x100)) - step_08 - illegal - {0xCB}
-    assert len(OPCODES) == 243
-    assert len(OPCODES) + 1 + len(step_08) + len(illegal) == 0x100
+    assert OPCODES.keys() == set(range(0x100)) - illegal - {0xCB}
+    assert len(OPCODES) == 244
+    assert len(OPCODES) + 1 + len(illegal) == 0x100

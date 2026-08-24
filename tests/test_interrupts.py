@@ -216,3 +216,46 @@ def test_waking_leaves_the_source_pending_when_it_is_not_serviced(
     cpu.step()
 
     assert pending(cpu.bus) is Interrupt.TIMER
+
+
+def test_stop_consumes_its_second_byte_and_costs_four_cycles(
+    cpu_running: CpuRunning,
+) -> None:
+    cpu = _armed(cpu_running, 0x10, 0x00, ie=0x00, if_=0x00)  # STOP
+
+    assert cpu.step() == 4
+    assert cpu.registers.pc == 0x0102
+
+
+def test_stop_does_not_execute_its_second_byte(cpu_running: CpuRunning) -> None:
+    cpu = _armed(cpu_running, 0x10, 0x3C, ie=0x00, if_=0x00)  # STOP, then INC A
+
+    cpu.step()
+
+    assert cpu.registers.a == 0x00
+
+
+def test_stop_leaves_the_cpu_asleep(cpu_running: CpuRunning) -> None:
+    cpu = _armed(cpu_running, 0x10, 0x00, 0x3C, ie=0x00, if_=0x00)
+
+    cpu.step()
+    for _ in range(100):
+        assert cpu.step() == 4
+
+    assert cpu.halted is True
+    assert cpu.registers.pc == 0x0102
+    assert cpu.registers.a == 0x00
+
+
+def test_a_stopped_cpu_wakes_like_a_halted_one(cpu_running: CpuRunning) -> None:
+    # For now, we simply consume 1 byte after the instruction and behave like a HALT.
+    # This test covers the stub.
+    cpu = _armed(cpu_running, 0x10, 0x00, 0x3C, ie=0x04, if_=0x00)
+    cpu.ime = False
+
+    cpu.step()
+    cpu.bus.write(INTERRUPT_FLAG, 0x04)
+    cpu.step()
+
+    assert cpu.halted is False
+    assert cpu.registers.a == 0x01
