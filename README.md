@@ -17,7 +17,7 @@ with the theory, the tasks and the acceptance criteria.
 | 05 | [Loads, the ALU and the flags](docs/STEP_05.md) | done |
 | 06 | [Jumps, calls and the stack](docs/STEP_06.md) | done |
 | 07 | [CB-prefixed opcodes: rotates, shifts and bit operations](docs/STEP_07.md) | done |
-| 08 | [Interrupts, `HALT` and the master flag](docs/STEP_08.md) | next |
+| 08 | [Interrupts, `HALT` and the master flag](docs/STEP_08.md) | done |
 
 ## Requirements
 
@@ -83,19 +83,37 @@ The summary line closes every run. Its cycle total is the clock everything else
 will be synchronised against from Step 09 onwards — one DMG frame is 70224
 T-cycles.
 
-The instruction set is complete except for the five opcodes that manipulate the
-interrupt master flag, so a real ROM now runs its whole boot sequence and stops
-when it reaches one of them — on Tetris, `0xF3` (`DI`) at `0x021D`. The trace
-ends there with a non-zero exit code, naming the opcode and the address the
-instruction began at:
+The base opcode table is complete: 244 instructions, the `0xCB` prefix and the 11
+illegal opcodes account for all 256 bytes. A real ROM now runs its whole boot
+sequence to the end, and what stops it is missing hardware rather than a missing
+instruction:
 
 ```
-021B  3E     LD A, d8      A:01 F:C0 BC:0000 DE:00D8 HL:CFFF SP:FFFE  8
---- 12328 instructions, 98568 T-cycles, unknown opcode 0xF3 at 0x021D ---
+0235  FE     CP A, d8      A:00 F:70 BC:0000 DE:00D8 HL:CFFF SP:FFFE  8
+0237  20     JR NZ, e8     A:00 F:70 BC:0000 DE:00D8 HL:CFFF SP:FFFE  12
+0233  F0     LDH A, (a8)   A:00 F:70 BC:0000 DE:00D8 HL:CFFF SP:FFFE  12
+--- 200000 instructions, 2100400 T-cycles, reached the 200000 instruction limit ---
 ```
 
-That address is what you feed back to `--dump`. 98568 T-cycles is about 1.4
-frames, so the whole boot sequence is roughly 23 ms of Game Boy time.
+Tetris reaches `0x0233` after 12341 instructions — thirteen past the `DI` that
+used to end the run — and never leaves. Feed the address back to `--dump` and the
+loop explains itself:
+
+```
+0233: F0 44    LDH A, (FF44)    ; LY, the line the PPU is drawing
+0235: FE 94    CP  A, 0x94      ; 148, the first line of VBlank
+0237: 20 FA    JR  NZ, -6
+0239: 3E 03    LD  A, 0x03      ; never reached — what follows writes LCDC
+```
+
+It reads `LY` 62554 times in this run and gets `0x00` every time, because nothing
+writes `LY` yet. An endless loop here is the correct outcome: the ROM has
+finished configuring itself and is waiting for the start of VBlank before it
+touches VRAM.
+
+Interrupts work, but nothing raises one. `IF` at `0xFF0F` is written by hardware,
+and the first devices that will write it are the timer in Step 09 and the PPU in
+Step 11.
 
 ## Development
 
