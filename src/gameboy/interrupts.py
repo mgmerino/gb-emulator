@@ -14,6 +14,10 @@
 
 from enum import IntEnum
 
+from gameboy.bits import get_bit
+from gameboy.memory import MemoryDevice
+from gameboy.memory_map import INTERRUPT_ENABLE, INTERRUPT_FLAG
+
 
 class Interrupt(IntEnum):
     VBLANK = 0
@@ -25,3 +29,16 @@ class Interrupt(IntEnum):
     @property
     def vector(self) -> int:
         return 0x40 + self * 8
+
+
+def pending(bus: MemoryDevice) -> Interrupt | None:
+    ie = bus.read(INTERRUPT_ENABLE)
+    i_flag = bus.read(INTERRUPT_FLAG)
+    result = ie & i_flag & 0x1F
+
+    # The order is the implied priority. If any, will return the lowest one
+    for interrupt in Interrupt:
+        if get_bit(result, interrupt):
+            return interrupt
+
+    return None
