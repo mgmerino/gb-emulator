@@ -8,7 +8,6 @@ show up if every entry had captured the same index.
 import pytest
 from conftest import REGISTER_OPERANDS, CpuRunning
 
-from gameboy.cpu import UnknownOpcodeError
 from gameboy.encoding import (
     Operand,
     RegisterPair,
@@ -112,18 +111,11 @@ def test_load_block_copies_source_to_destination(
     assert cpu.registers.f == 0x00  # the load block never touches flags
 
 
-def test_load_block_covers_every_opcode_except_halt() -> None:
-    halt = 0x76
+def test_the_load_block_is_full_and_its_hole_holds_halt() -> None:
     block = set(range(0x40, 0x80))
 
-    assert OPCODES.keys() & block == block - {halt}
-
-
-def test_halt_is_not_a_load(cpu_running: CpuRunning) -> None:
-    opcode = 0x76
-    cpu = cpu_running(opcode)
-    with pytest.raises(UnknownOpcodeError, match="unknown opcode 0x76"):
-        cpu.step()
+    assert OPCODES.keys() & block == block
+    assert OPCODES[0x76].name == "HALT"
 
 
 def test_load_block_names_read_as_assembly() -> None:
@@ -2436,11 +2428,10 @@ def test_rla_and_rra_bring_the_incoming_carry_into_the_vacated_end(
     assert cpu.registers.c_flag is False
 
 
-def test_the_base_table_is_complete_but_for_step_08_and_the_illegal_opcodes() -> None:
+def test_the_base_table_is_complete_but_for_illegal_opcodes() -> None:
     # These are the missing opcodes to finish the base table:
-    step_08 = {0x10, 0x76, 0xD9, 0xF3, 0xFB}  # STOP, HALT, RETI, DI, EI
     illegal = {0xD3, 0xDB, 0xDD, 0xE3, 0xE4, 0xEB, 0xEC, 0xED, 0xF4, 0xFC, 0xFD}
 
-    assert OPCODES.keys() == set(range(0x100)) - step_08 - illegal - {0xCB}
-    assert len(OPCODES) == 239
-    assert len(OPCODES) + 1 + len(step_08) + len(illegal) == 0x100
+    assert OPCODES.keys() == set(range(0x100)) - illegal - {0xCB}
+    assert len(OPCODES) == 244
+    assert len(OPCODES) + 1 + len(illegal) == 0x100
