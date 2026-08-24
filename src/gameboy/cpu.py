@@ -167,13 +167,18 @@ class CPU:
     ime: bool = False  # master flag
     ime_pending: bool = False  # EI fired, promote after the next instruction
     halted: bool = False
+    halt_bug: bool = False
 
     def fetch_u8(self) -> int:
         # where are you, dear Program Counter?
         # please, tell me what 8 bits are on your sight!
         value = self.bus.read(self.registers.pc)
-        # ok, now advance one step, see you on the next address!
-        self.registers.pc = u16(self.registers.pc + 1)  # out(t) = out(t-1) + 1
+        if self.halt_bug:
+            # don't increment the pc and clear flag
+            self.halt_bug = False
+        else:
+            # ok, now advance one step, see you on the next address!
+            self.registers.pc = u16(self.registers.pc + 1)  # out(t) = out(t-1) + 1
 
         return value
 
