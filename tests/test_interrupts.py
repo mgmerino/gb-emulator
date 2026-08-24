@@ -259,3 +259,76 @@ def test_a_stopped_cpu_wakes_like_a_halted_one(cpu_running: CpuRunning) -> None:
 
     assert cpu.halted is False
     assert cpu.registers.a == 0x01
+
+
+def test_the_halt_bug_does_not_halt_the_cpu(cpu_running: CpuRunning) -> None:
+    cpu = _armed(cpu_running, 0x76, 0x3C, ie=0x01, if_=0x01)  # HALT ; INC A
+    cpu.ime = False
+
+    assert cpu.step() == 4
+    assert cpu.halted is False
+
+
+def test_the_halt_bug_executes_the_following_byte_twice(
+    cpu_running: CpuRunning,
+) -> None:
+    cpu = _armed(cpu_running, 0x76, 0x3C, ie=0x01, if_=0x01)  # HALT ; INC A
+    cpu.ime = False
+
+    for _ in range(3):
+        cpu.step()
+
+    assert cpu.registers.a == 0x02
+    assert cpu.registers.pc == 0x0102
+
+
+def test_the_halt_bug_costs_a_single_fetch(cpu_running: CpuRunning) -> None:
+    cpu = _armed(
+        cpu_running, 0x76, 0x3C, 0x04, ie=0x01, if_=0x01
+    )  # HALT ; INC A ; INC B
+    cpu.ime = False
+
+    for _ in range(4):
+        cpu.step()
+
+    assert cpu.registers.a == 0x02
+    assert cpu.registers.b == 0x01
+    assert cpu.registers.pc == 0x0103
+
+
+def test_the_halt_bug_feeds_an_opcode_to_itself_as_an_operand(
+    cpu_running: CpuRunning,
+) -> None:
+    # PC does not advance on the first fetch, so `LD A, d8` reads its own opcode
+    # as the immediate. Everything after this point decodes off by one byte.
+    cpu = _armed(cpu_running, 0x76, 0x3E, 0x12, ie=0x01, if_=0x01)  # HALT ; LD A, 0x12
+    cpu.ime = False
+
+    cpu.step()
+    cpu.step()
+
+    assert cpu.registers.a == 0x3E
+    assert cpu.registers.pc == 0x0102
+
+
+def test_halt_sleeps_normally_when_nothing_is_pending(cpu_running: CpuRunning) -> None:
+    cpu = _armed(cpu_running, 0x76, 0x3C, ie=0x01, if_=0x00)
+    cpu.ime = False
+
+    for _ in range(10):
+        cpu.step()
+
+    assert cpu.halted is True
+    assert cpu.registers.a == 0x00
+
+
+def test_a_pending_source_is_serviced_before_halt_is_ever_fetched(
+    cpu_running: CpuRunning,
+) -> None:
+    # The mirror of the HALT bug: same setup with IME set, and the dispatch at
+    # the top of `step()` wins, so HALT never runs.
+    cpu = _armed(cpu_running, 0x76, 0x3C, ie=0x01, if_=0x01)
+
+    assert cpu.step() == 20
+    assert cpu.registers.pc == Interrupt.VBLANK.vector
+    assert cpu.halted is False

@@ -50,6 +50,7 @@ from gameboy.encoding import (
     write_pair,
     write_stack_pair,
 )
+from gameboy.interrupts import pending
 
 if TYPE_CHECKING:
     from gameboy.cpu import CPU
@@ -1064,7 +1065,11 @@ def _reti(cpu: CPU) -> None:
 
 
 def _halt(cpu: CPU) -> None:
-    cpu.halted = True
+    # https://gbdev.io/pandocs/halt.html#halt-bug
+    if not cpu.ime and pending(cpu.bus) is not None:
+        cpu.halt_bug = True
+    else:
+        cpu.halted = True
 
 
 # Since `STOP` halts the CPU and the LCD until a button is pressed, modelling it needs
