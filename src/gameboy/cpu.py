@@ -14,9 +14,11 @@ from dataclasses import dataclass
 from typing import Self
 
 from gameboy.alu import Flags
-from gameboy.bits import get_bit, high_byte, join_bytes, low_byte, u16
+from gameboy.bits import clear_bit, get_bit, high_byte, join_bytes, low_byte, u16
 from gameboy.instructions import CB_OPCODES, OPCODES
+from gameboy.interrupts import pending
 from gameboy.memory import MemoryDevice
+from gameboy.memory_map import INTERRUPT_FLAG
 
 # Since masking is _expected_ to be executed from the top layer, we want to ensure
 # no invalid values slip into the Registers class.
@@ -162,6 +164,9 @@ class UnknownOpcodeError(Exception):
 class CPU:
     bus: MemoryDevice
     registers: Registers
+    ime: bool = False  # master flag
+    ime_pending: bool = False  # EI fired, promote after the next instruction
+
 
     def fetch_u8(self) -> int:
         # where are you, dear Program Counter?
@@ -181,8 +186,21 @@ class CPU:
         return join_bytes(high, low)
 
     def step(self) -> int:
-        # PC advances before execution, not after. By the time an instruction
-        # runs, PC already points at its first operand byte.
+        pending_interrupt = pending(self.bus)  # is a bus read, so we better save it
+
+        if self.ime and pending_interrupt is not None:
+            self.ime = False
+
+            # clear interrupt flag before pushing the stack
+            i_flag = self.bus.read(INTERRUPT_FLAG)
+            self.bus.write(INTERRUPT_FLAG, clear_bit(i_flag, pending_interrupt))
+
+            # push (ie: save the current pc), then point to the interrupt vector
+            self.push16(self.registers.pc)
+            self.registers.pc = pending_interrupt.vector
+            return 20
+
+        promote = self.ime_pending  # caution: needs to be captured *before* fetching
         opcode = self.fetch_u8()
         cb_opcode = None
 
@@ -199,6 +217,10 @@ class CPU:
                 address = u16(self.registers.pc - 1)
 
             raise UnknownOpcodeError(opcode, address)
+
+        if promote:
+            self.ime = True
+            self.ime_pending = False
 
         taken = instruction.execute(self)
         if taken and instruction.cycles_when_taken is not None:

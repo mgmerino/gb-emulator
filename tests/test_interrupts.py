@@ -1,7 +1,11 @@
 import pytest
+from conftest import CpuRunning
 
+from gameboy.bits import get_bit
+from gameboy.cpu import CPU
 from gameboy.interrupts import Interrupt, pending
 from gameboy.memory import Bus
+from gameboy.memory_map import INTERRUPT_ENABLE, INTERRUPT_FLAG
 
 
 def test_interrupt_table_vectors() -> None:
@@ -31,3 +35,104 @@ def test_pending(bus: Bus, ie: int, i_flag: int, expected: Interrupt | None) -> 
     bus.write(0xFF0F, i_flag)  # if
 
     assert pending(bus) is expected
+
+
+def _armed(cpu_running: CpuRunning, *program: int, ie: int, if_: int) -> CPU:
+    """A CPU at 0x0100 with a stack, IME on, and both interrupt registers set."""
+    cpu = cpu_running(*program)
+    cpu.registers.sp = 0xFFFE
+    cpu.ime = True
+    cpu.bus.write(INTERRUPT_ENABLE, ie)
+    cpu.bus.write(INTERRUPT_FLAG, if_)
+
+    return cpu
+
+
+def test_a_dispatch_jumps_to_the_vector_and_costs_twenty(
+    cpu_running: CpuRunning,
+) -> None:
+    cpu = _armed(cpu_running, ie=0x04, if_=0x04)
+
+    assert cpu.step() == 20
+    assert cpu.registers.pc == Interrupt.TIMER.vector
+
+
+def test_a_dispatch_pushes_the_address_the_cpu_was_about_to_execute(
+    cpu_running: CpuRunning,
+) -> None:
+    cpu = _armed(cpu_running, ie=0x04, if_=0x04)
+
+    cpu.step()
+
+    assert cpu.registers.sp == 0xFFFC
+    assert cpu.bus.read16(0xFFFC) == 0x0100
+
+
+def test_a_dispatch_closes_the_master_flag(cpu_running: CpuRunning) -> None:
+    cpu = _armed(cpu_running, ie=0x04, if_=0x04)
+
+    cpu.step()
+
+    assert cpu.ime is False
+
+
+def test_a_dispatch_acknowledges_the_source_by_clearing_its_flag(
+    cpu_running: CpuRunning,
+) -> None:
+    cpu = _armed(cpu_running, ie=0x04, if_=0x04)
+
+    cpu.step()
+
+    assert get_bit(cpu.bus.read(INTERRUPT_FLAG), Interrupt.TIMER) is False
+
+
+def test_a_dispatch_leaves_the_sources_it_did_not_serve_pending(
+    cpu_running: CpuRunning,
+) -> None:
+    cpu = _armed(cpu_running, ie=0x1F, if_=0x14)
+
+    cpu.step()
+
+    assert pending(cpu.bus) is Interrupt.JOYPAD
+
+
+def test_a_dispatch_executes_no_instruction(cpu_running: CpuRunning) -> None:
+    cpu = _armed(cpu_running, 0x3C, ie=0x04, if_=0x04)  # INC A
+
+    cpu.step()
+
+    assert cpu.registers.a == 0x00
+
+
+def test_a_handler_runs_once_and_the_interrupted_program_resumes(
+    cpu_running: CpuRunning,
+) -> None:
+    cpu = _armed(cpu_running, 0x3C, ie=0x04, if_=0x04)  # INC A
+    cpu.bus.write(Interrupt.TIMER.vector, 0x04)  # INC B
+    cpu.bus.write(Interrupt.TIMER.vector + 1, 0xD9)  # RETI
+
+    for _ in range(4):  # dispatch, INC B, RETI, INC A
+        cpu.step()
+
+    assert cpu.registers.b == 0x01
+    assert cpu.registers.a == 0x01
+    assert cpu.registers.pc == 0x0101
+    assert cpu.registers.sp == 0xFFFE
+
+
+def test_ei_is_promoted_by_a_taken_conditional_return(
+    cpu_running: CpuRunning,
+) -> None:
+    cpu = cpu_running(0xFB, 0xC8)  # EI ; RET Z
+    cpu.registers.sp = 0xFFFC
+    cpu.registers.z_flag = True
+    cpu.bus.write16(0xFFFC, 0x0200)
+
+    cpu.step()
+    assert cpu.ime is False
+
+    cpu.step()
+
+    assert cpu.registers.pc == 0x0200
+    assert cpu.ime is True
+    assert cpu.ime_pending is False
