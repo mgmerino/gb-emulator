@@ -1045,6 +1045,24 @@ def _rra(cpu: CPU) -> None:
     cpu.registers.a = result
 
 
+#
+# --- Interrupts
+#
+
+
+def _di(cpu: CPU) -> None:
+    cpu.ime = False
+
+
+def _ei(cpu: CPU) -> None:
+    cpu.ime_pending = True
+
+
+def _reti(cpu: CPU) -> None:
+    cpu.registers.pc = cpu.pop16()
+    cpu.ime = True
+
+
 OPCODES: Final[dict[int, Instruction]] = {
     0x00: Instruction("NOP", 4, _nop),
     0xC3: Instruction("JP a16", 16, _jp_a16),
@@ -1120,6 +1138,9 @@ OPCODES: Final[dict[int, Instruction]] = {
     0x0F: Instruction("RRCA", 4, _rrca),
     0x17: Instruction("RLA", 4, _rla),
     0x1F: Instruction("RRA", 4, _rra),
+    0xF3: Instruction("DI", 4, _di),
+    0xFB: Instruction("EI", 4, _ei),
+    0xD9: Instruction("RETI", 16, _reti),
 }
 
 # The CB-prefixed table, the 0xCB escape in `step()`.
