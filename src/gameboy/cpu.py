@@ -166,7 +166,7 @@ class CPU:
     registers: Registers
     ime: bool = False  # master flag
     ime_pending: bool = False  # EI fired, promote after the next instruction
-
+    halted: bool = False
 
     def fetch_u8(self) -> int:
         # where are you, dear Program Counter?
@@ -187,6 +187,12 @@ class CPU:
 
     def step(self) -> int:
         pending_interrupt = pending(self.bus)  # is a bus read, so we better save it
+        # wake up or keep halted
+        if self.halted:
+            if pending_interrupt is not None:
+                self.halted = False
+            else:
+                return 4
 
         if self.ime and pending_interrupt is not None:
             self.ime = False

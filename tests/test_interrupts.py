@@ -136,3 +136,83 @@ def test_ei_is_promoted_by_a_taken_conditional_return(
     assert cpu.registers.pc == 0x0200
     assert cpu.ime is True
     assert cpu.ime_pending is False
+
+
+def test_halt_sets_the_halted_flag_and_costs_four_cycles(
+    cpu_running: CpuRunning,
+) -> None:
+    cpu = _armed(cpu_running, 0x76, ie=0x00, if_=0x00)  # HALT
+
+    assert cpu.step() == 4
+    assert cpu.halted is True
+
+
+def test_a_halted_cpu_fetches_nothing_and_still_reports_time(
+    cpu_running: CpuRunning,
+) -> None:
+    cpu = _armed(cpu_running, 0x76, 0x3C, ie=0x00, if_=0x00)  # HALT ; INC A
+
+    cpu.step()
+    for _ in range(100):
+        assert cpu.step() == 4
+
+    assert cpu.registers.pc == 0x0101
+    assert cpu.registers.a == 0x00
+
+
+def test_a_source_the_program_did_not_enable_does_not_wake_the_cpu(
+    cpu_running: CpuRunning,
+) -> None:
+    cpu = _armed(cpu_running, 0x76, 0x3C, ie=0x00, if_=0x00)
+
+    cpu.step()
+    cpu.bus.write(INTERRUPT_FLAG, 0x04)  # the timer overflows, nobody cares
+
+    for _ in range(100):
+        cpu.step()
+
+    assert cpu.halted is True
+    assert cpu.registers.a == 0x00
+
+
+def test_a_pending_source_wakes_the_cpu_and_dispatches_when_ime_is_set(
+    cpu_running: CpuRunning,
+) -> None:
+    # IF stays clear while HALT runs: with a source already pending the CPU
+    # would not halt at all, which is the HALT bug and not this test's subject.
+    cpu = _armed(cpu_running, 0x76, 0x3C, ie=0x04, if_=0x00)
+
+    cpu.step()
+    cpu.bus.write(INTERRUPT_FLAG, 0x04)
+
+    assert cpu.step() == 20
+    assert cpu.halted is False
+    assert cpu.registers.pc == Interrupt.TIMER.vector
+
+
+def test_a_pending_source_wakes_the_cpu_without_dispatching_when_ime_is_clear(
+    cpu_running: CpuRunning,
+) -> None:
+    cpu = _armed(cpu_running, 0x76, 0x3C, ie=0x04, if_=0x00)  # HALT ; INC A
+    cpu.ime = False
+
+    cpu.step()
+    cpu.bus.write(INTERRUPT_FLAG, 0x04)
+    cpu.step()
+
+    assert cpu.halted is False
+    assert cpu.registers.a == 0x01
+    assert cpu.registers.pc == 0x0102
+
+
+def test_waking_leaves_the_source_pending_when_it_is_not_serviced(
+    cpu_running: CpuRunning,
+) -> None:
+    cpu = _armed(cpu_running, 0x76, 0x3C, ie=0x04, if_=0x00)
+    cpu.ime = False
+
+    cpu.step()
+    cpu.bus.write(INTERRUPT_FLAG, 0x04)
+    cpu.step()
+
+    assert pending(cpu.bus) is Interrupt.TIMER
