@@ -1063,6 +1063,10 @@ def _reti(cpu: CPU) -> None:
     cpu.ime = True
 
 
+def _halt(cpu: CPU) -> None:
+    cpu.halted = True
+
+
 OPCODES: Final[dict[int, Instruction]] = {
     0x00: Instruction("NOP", 4, _nop),
     0xC3: Instruction("JP a16", 16, _jp_a16),
@@ -1141,6 +1145,7 @@ OPCODES: Final[dict[int, Instruction]] = {
     0xF3: Instruction("DI", 4, _di),
     0xFB: Instruction("EI", 4, _ei),
     0xD9: Instruction("RETI", 16, _reti),
+    0x76: Instruction("HALT", 4, _halt),
 }
 
 # The CB-prefixed table, the 0xCB escape in `step()`.
