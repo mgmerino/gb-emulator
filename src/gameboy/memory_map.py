@@ -30,7 +30,10 @@ PROHIBITED: Final = range(0xFEA0, 0xFF00)
 IO: Final = range(0xFF00, 0xFF80)
 # Console: high RAM
 HRAM: Final = range(0xFF80, 0xFFFF)
+
+# Interrupts
 INTERRUPT_ENABLE: Final = 0xFFFF
+INTERRUPT_FLAG: Final = 0xFF0F
 
 # Hardware mapping states
 OPEN_BUS: Final = 0xFF
