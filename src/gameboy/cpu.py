@@ -11,7 +11,7 @@
 """
 
 from dataclasses import dataclass
-from typing import Self
+from typing import Self, override
 
 from gameboy.alu import Flags
 from gameboy.bits import clear_bit, get_bit, high_byte, join_bytes, low_byte, u16
@@ -62,6 +62,7 @@ class Registers:
 
     if __debug__:
 
+        @override
         def __setattr__(self, name: str, value: object) -> None:
             width = _WIDTHS.get(name)
             # isinstance narrows `value` to int for the comparison, and rejects
@@ -154,6 +155,9 @@ class Registers:
 
 
 class UnknownOpcodeError(Exception):
+    opcode: int
+    address: int
+
     def __init__(self, opcode: int, address: int) -> None:
         super().__init__(f"unknown opcode 0x{opcode:02X} at 0x{address:04X}")
         self.opcode = opcode

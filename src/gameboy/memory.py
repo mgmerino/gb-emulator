@@ -4,7 +4,7 @@ crashes the emulator instead of degrading it, and we lose the ability to see
 how far a ROM gets.
 """
 
-from typing import Protocol
+from typing import Protocol, final
 
 from gameboy import bits, memory_map
 
@@ -16,6 +16,7 @@ class MemoryDevice(Protocol):
     def write16(self, address: int, value: int) -> None: ...
 
 
+@final
 class Bus:
     def __init__(self, cartridge: MemoryDevice) -> None:
         self.cartridge = cartridge

@@ -38,3 +38,9 @@ INTERRUPT_FLAG: Final = 0xFF0F
 # Hardware mapping states
 OPEN_BUS: Final = 0xFF
 PROHIBITED_READ: Final = 0x00
+
+# Timer
+DIVIDER: Final = 0xFF04
+TIMER_COUNTER: Final = 0xFF05
+TIMER_MODULO: Final = 0xFF06
+TIMER_CONTROL: Final = 0xFF07
