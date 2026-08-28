@@ -6,7 +6,11 @@ the core: the emulator is a plain Python package that exposes a framebuffer and
 accepts button state.
 
 Progress follows [`docs/PLAN.md`](docs/PLAN.md). Each step has its own document
-with the theory, the tasks and the acceptance criteria.
+with the theory, the tasks and the acceptance criteria. Those read as a story in
+order; for a map of the code as it stands right now, there is an AI-generated
+tour:
+
+[![DeepWiki](https://deepwiki.com/badge.svg)](https://deepwiki.com/mgmerino/gb-emulator)
 
 | Step | | |
 | --- | --- | --- |
