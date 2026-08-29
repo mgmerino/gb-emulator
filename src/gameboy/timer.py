@@ -76,19 +76,21 @@ class Timer:
 
         return 0xFF
 
-    def write(self, address: int, value: int) -> None:
+    def write(self, address: int, value: int) -> bool:
         if address == DIVIDER:
             self.counter = 0
-            return
+            return self._sample_gate()
         if address == TIMER_COUNTER:
             self.tima = value
-            return
+            return False
         if address == TIMER_MODULO:
             self.tma = value
-            return
+            return False
         if address == TIMER_CONTROL:
             self.tac = value
-            return
+            return self._sample_gate()
+
+        return False
 
     def _advance_tima(self, watched_bit: int, enable: bool) -> bool:
         """Sample the AND gate. Returns whether TIMA overflowed on this sample."""
@@ -103,3 +105,7 @@ class Timer:
                 return True
 
         return False
+
+    def _sample_gate(self) -> bool:
+        """Re-evaluate the gate after a write changed one of its inputs."""
+        return self._advance_tima(_WATCHED_BITS[self.tac & 0b11], get_bit(self.tac, 2))
