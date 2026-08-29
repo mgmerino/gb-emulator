@@ -34,6 +34,8 @@ HRAM: Final = range(0xFF80, 0xFFFF)
 # Interrupts
 INTERRUPT_ENABLE: Final = 0xFFFF
 INTERRUPT_FLAG: Final = 0xFF0F
+# Only five interrupts exist; the top three bits are unwired and read as 1.
+INTERRUPT_FLAG_UNUSED: Final = 0xE0
 
 # Hardware mapping states
 OPEN_BUS: Final = 0xFF

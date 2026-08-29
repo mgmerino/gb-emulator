@@ -7,6 +7,7 @@ how far a ROM gets.
 from typing import Protocol, final
 
 from gameboy import bits, memory_map
+from gameboy.interrupts import Interrupt, request
 from gameboy.timer import Timer
 
 
@@ -27,6 +28,7 @@ class Bus:
         self.oam = bytearray(0xA0)
         self.io = bytearray(0x80)
         self.ie = 0
+        self.i_flag = 0
         self.timer = timer
 
     def read(self, address: int) -> int:
@@ -41,6 +43,10 @@ class Bus:
                 return self.cartridge.read(masked_address)
             case _ if masked_address in memory_map.TIMER_REGISTERS:
                 return self.timer.read(masked_address)
+            case memory_map.INTERRUPT_FLAG:
+                # Only five sources exist, so bits 7-5 are not wired to anything
+                # and an unwired line on this bus reads high.
+                return self.i_flag | memory_map.INTERRUPT_FLAG_UNUSED
             case _ if masked_address in memory_map.WRAM:
                 return self.wram[masked_address - memory_map.WRAM.start]
             case _ if masked_address in memory_map.VRAM:
@@ -72,6 +78,8 @@ class Bus:
             case _ if masked_address in memory_map.TIMER_REGISTERS:
                 if self.timer.write(masked_address, masked_value):
                     request(self, Interrupt.TIMER)
+            case memory_map.INTERRUPT_FLAG:
+                self.i_flag = masked_value
             case _ if masked_address in memory_map.WRAM:
                 self.wram[masked_address - memory_map.WRAM.start] = masked_value
             case _ if masked_address in memory_map.VRAM:
@@ -90,6 +98,11 @@ class Bus:
                 return
             case _:
                 return
+
+    def tick(self, cycles: int) -> None:
+        """Fan the elapsed time out to the devices hanging off the bus."""
+        if self.timer.tick(cycles):
+            request(self, Interrupt.TIMER)
 
     def read16(self, address: int) -> int:
         return bits.join_bytes(self.read(address + 1), self.read(address))

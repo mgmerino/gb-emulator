@@ -1,6 +1,15 @@
 import pytest
 
-from gameboy.memory_map import DIVIDER, TIMER_CONTROL, TIMER_COUNTER, TIMER_MODULO
+from gameboy.bits import get_bit
+from gameboy.interrupts import Interrupt
+from gameboy.memory import Bus
+from gameboy.memory_map import (
+    DIVIDER,
+    INTERRUPT_FLAG,
+    TIMER_CONTROL,
+    TIMER_COUNTER,
+    TIMER_MODULO,
+)
 from gameboy.timer import Timer
 
 
@@ -295,3 +304,50 @@ def test_an_overflow_is_reported_even_when_it_is_not_the_last_edge(
 
     assert timer.tick(24) is True
     assert timer.tima == 0x30
+
+
+#
+# --- The bus seam: an overflow has to reach IF
+#
+
+
+def _timer_interrupt_requested(bus: Bus) -> bool:
+    return get_bit(bus.read(INTERRUPT_FLAG), Interrupt.TIMER)
+
+
+def test_the_bus_hands_elapsed_time_to_the_timer(bus: Bus) -> None:
+    bus.tick(256)
+
+    assert bus.read(DIVIDER) == 0x01
+
+
+def test_an_overflow_during_a_tick_requests_the_timer_interrupt(bus: Bus) -> None:
+    bus.write(TIMER_CONTROL, 0b101)
+    bus.write(TIMER_COUNTER, 0xFF)
+
+    assert not _timer_interrupt_requested(bus)
+
+    bus.tick(16)
+
+    assert _timer_interrupt_requested(bus)
+
+
+def test_a_tick_without_an_overflow_requests_nothing(bus: Bus) -> None:
+    bus.write(TIMER_CONTROL, 0b101)
+
+    bus.tick(16)
+
+    assert bus.timer.tima == 1
+    assert not _timer_interrupt_requested(bus)
+
+
+def test_an_overflow_caused_by_a_write_also_requests_the_interrupt(bus: Bus) -> None:
+    bus.write(TIMER_CONTROL, 0b100)  # 4096 Hz, watches bit 9
+    bus.write(TIMER_COUNTER, 0xFF)
+    bus.tick(0x200)  # arms the detector with the watched bit high
+
+    assert not _timer_interrupt_requested(bus)
+
+    bus.write(DIVIDER, 0x00)
+
+    assert _timer_interrupt_requested(bus)

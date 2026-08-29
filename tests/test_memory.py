@@ -3,7 +3,13 @@ from conftest import FakeCartridge
 
 from gameboy import memory_map
 from gameboy.memory import Bus
-from gameboy.memory_map import DIVIDER, TIMER_CONTROL, TIMER_COUNTER, TIMER_MODULO
+from gameboy.memory_map import (
+    DIVIDER,
+    INTERRUPT_FLAG,
+    TIMER_CONTROL,
+    TIMER_COUNTER,
+    TIMER_MODULO,
+)
 
 # ---------------------------------------------------------------------------
 # Console RAM
@@ -316,3 +322,32 @@ def test_writing_tac_through_the_bus_reads_back_with_its_unused_bits_set(
     bus.write(TIMER_CONTROL, 0x05)
 
     assert bus.read(TIMER_CONTROL) == 0xFD
+
+
+def test_the_interrupt_flag_reads_its_unused_bits_as_one(bus: Bus) -> None:
+    bus.write(INTERRUPT_FLAG, 0x04)
+
+    assert bus.read(INTERRUPT_FLAG) == 0xE4
+
+
+def test_the_interrupt_flag_reads_its_unused_bits_as_one_when_nothing_is_pending(
+    bus: Bus,
+) -> None:
+    # A program that reads IF on an idle machine sees 0xE0, not 0x00. Blargg
+    # checks this.
+    assert bus.read(INTERRUPT_FLAG) == 0xE0
+
+
+def test_the_five_real_bits_of_the_interrupt_flag_round_trip(bus: Bus) -> None:
+    bus.write(INTERRUPT_FLAG, 0b10101)
+
+    assert bus.read(INTERRUPT_FLAG) & 0x1F == 0b10101
+
+
+def test_the_interrupt_flag_does_not_fall_through_to_the_io_array(bus: Bus) -> None:
+    # 0xFF0F lives inside the IO range, so both of its cases only ever run if
+    # they come first in the match.
+    bus.write(INTERRUPT_FLAG, 0x04)
+
+    assert bus.io[INTERRUPT_FLAG - 0xFF00] == 0x00
+    assert bus.i_flag == 0x04
