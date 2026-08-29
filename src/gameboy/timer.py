@@ -37,15 +37,16 @@ from gameboy.memory_map import DIVIDER, TIMER_CONTROL, TIMER_COUNTER, TIMER_MODU
 # └──────┴─────┴───────────────┘
 
 _TAC_UNUSED: Final = 0xF8  # 5 bits high, 3 low
+_WATCHED_BITS: Final = (9, 3, 5, 7)  # indexed by TAC bits 1-0, in encoding order
 
 
 @dataclass(slots=True)
 class Timer:
     counter: int = 0  # internal timer counter, fixed
-    tima: int = 0  # timer counter, configurable (counts based on clock select)
+    tima: int = 0  # timer counter, configurable
     tma: int = 0  # timer modulo
     tac: int = 0  # timer control
-    last_and: bool = False  # detect falling voltage
+    last_and: bool = False  # what the gate read on the previous sample
 
     @property
     def divider(self) -> int:
@@ -53,20 +54,13 @@ class Timer:
 
     def tick(self, cycles: int) -> bool:
         overflowed = False
-        watched = (9, 3, 5, 7)[self.tac & 0b11]
+        watched_bit = _WATCHED_BITS[self.tac & 0b11]
         enable = get_bit(self.tac, 2)
 
         for _ in range(0, cycles, 4):
             self.counter = u16(self.counter + 4)
-            current_and = get_bit(self.counter, watched) and enable
-            falling = self.last_and and not current_and
-            self.last_and = current_and
-
-            if falling:
-                self.tima += 1
-                if self.tima > 0xFF:
-                    self.tima = self.tma
-                    overflowed = True
+            if self._advance_tima(watched_bit, enable):
+                overflowed = True
 
         return overflowed
 
@@ -95,3 +89,17 @@ class Timer:
         if address == TIMER_CONTROL:
             self.tac = value
             return
+
+    def _advance_tima(self, watched_bit: int, enable: bool) -> bool:
+        """Sample the AND gate. Returns whether TIMA overflowed on this sample."""
+        current_and = get_bit(self.counter, watched_bit) and enable
+        falling = self.last_and and not current_and
+        self.last_and = current_and
+
+        if falling:
+            self.tima += 1
+            if self.tima > 0xFF:
+                self.tima = self.tma
+                return True
+
+        return False
