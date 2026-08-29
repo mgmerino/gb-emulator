@@ -22,6 +22,8 @@ tour:
 | 06 | [Jumps, calls and the stack](docs/STEP_06.md) | done |
 | 07 | [CB-prefixed opcodes: rotates, shifts and bit operations](docs/STEP_07.md) | done |
 | 08 | [Interrupts, `HALT` and the master flag](docs/STEP_08.md) | done |
+| 09 | [Timer, divider and the falling-edge detector](docs/STEP_09.md) | done |
+| 10 | Blargg `cpu_instrs` — arrived with Step 09's serial port | done |
 
 ## Requirements
 
@@ -88,20 +90,63 @@ will be synchronised against from Step 09 onwards — one DMG frame is 70224
 T-cycles.
 
 The base opcode table is complete: 244 instructions, the `0xCB` prefix and the 11
-illegal opcodes account for all 256 bytes. A real ROM now runs its whole boot
-sequence to the end, and what stops it is missing hardware rather than a missing
-instruction:
+illegal opcodes account for all 256 bytes.
+
+Run a ROM without the per-instruction firehose, and print whatever it said over
+the link cable:
 
 ```
-0235  FE     CP A, d8      A:00 F:70 BC:0000 DE:00D8 HL:CFFF SP:FFFE  8
-0237  20     JR NZ, e8     A:00 F:70 BC:0000 DE:00D8 HL:CFFF SP:FFFE  12
-0233  F0     LDH A, (a8)   A:00 F:70 BC:0000 DE:00D8 HL:CFFF SP:FFFE  12
---- 200000 instructions, 2100400 T-cycles, reached the 200000 instruction limit ---
+uv run python -m gameboy path/to/instr_timing.gb --run 300000
 ```
 
-Tetris reaches `0x0233` after 12341 instructions — thirteen past the `DI` that
-used to end the run — and never leaves. Feed the address back to `--dump` and the
-loop explains itself:
+```
+--- serial ---
+instr_timing
+
+Passed
+
+--- 300000 instructions, 2916120 T-cycles, reached the 300000 instruction limit ---
+```
+
+## Test ROMs
+
+Blargg's suite reports its verdict on the LCD and, byte by byte, over the serial
+port. There is no LCD until Step 11, which is why the serial stub arrives early:
+it is the emulator's only way to speak.
+
+All eleven `cpu_instrs` sub-tests pass, and so does `instr_timing`:
+
+| ROM | | ROM | |
+| --- | --- | --- | --- |
+| `01-special` | Passed | `07-jr,jp,call,ret,rst` | Passed |
+| `02-interrupts` | Passed | `08-misc instrs` | Passed |
+| `03-op sp,hl` | Passed | `09-op r,r` | Passed |
+| `04-op r,imm` | Passed | `10-bit ops` | Passed |
+| `05-op rp` | Passed | `11-op a,(hl)` | Passed |
+| `06-ld r,r` | Passed | `instr_timing` | Passed |
+
+`instr_timing` is the sharpest of them: it does not check what an instruction
+computes, it checks **how long it takes**, and the only clock a ROM can measure
+with is the timer. One `Passed` therefore verifies every cycle count in the
+opcode table — both branches of the conditionals included — *and* that the timer
+runs at the rate it claims.
+
+Roughly 290k instructions/second on CPython 3.12, about 80% of a real DMG.
+
+Two things do not work yet:
+
+- **the combined `cpu_instrs.gb`**, 64 KiB behind an MBC1. The bus maps bank 1 as
+  a fixed slice of the image, so banks 2 and 3 are unreachable and the ROM stops
+  after `01:ok  02:ok  03`. That is Step 15. The eleven individual ROMs are 32
+  KiB each and need no bank switching.
+- **`--run N` has no early exit**, so a verdict that arrives at 2M instructions
+  still costs the whole budget.
+
+## What is missing
+
+The timer raises interrupts and `HALT` wakes on its own, so the machine now keeps
+time. What it cannot do is draw: a real game configures itself, then waits for
+the PPU before touching VRAM, and that wait never ends.
 
 ```
 0233: F0 44    LDH A, (FF44)    ; LY, the line the PPU is drawing
@@ -110,14 +155,8 @@ loop explains itself:
 0239: 3E 03    LD  A, 0x03      ; never reached — what follows writes LCDC
 ```
 
-It reads `LY` 62554 times in this run and gets `0x00` every time, because nothing
-writes `LY` yet. An endless loop here is the correct outcome: the ROM has
-finished configuring itself and is waiting for the start of VBlank before it
-touches VRAM.
-
-Interrupts work, but nothing raises one. `IF` at `0xFF0F` is written by hardware,
-and the first devices that will write it are the timer in Step 09 and the PPU in
-Step 11.
+Nothing writes `LY` yet, so `CP` never matches. An endless loop here is the
+correct outcome, and it ends in Step 11.
 
 ## Development
 
