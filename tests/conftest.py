@@ -15,6 +15,7 @@ from gameboy.cartridge import Cartridge
 from gameboy.cpu import CPU, Registers
 from gameboy.encoding import Operand
 from gameboy.memory import Bus
+from gameboy.timer import Timer
 
 
 class FakeCartridge:
@@ -98,7 +99,7 @@ def cartridge(rom: bytes) -> Cartridge:
 @pytest.fixture
 def bus(cartridge: Cartridge) -> Bus:
     """A bus over a real cartridge. The default for most tests."""
-    return Bus(cartridge)
+    return Bus(cartridge, Timer())
 
 
 @pytest.fixture
@@ -109,7 +110,7 @@ def fake_bus() -> tuple[Bus, FakeCartridge]:
     fixtures and let the test request both. Try it and see which reads better.
     """
     device = FakeCartridge()
-    return Bus(device), device
+    return Bus(device, Timer()), device
 
 
 @pytest.fixture

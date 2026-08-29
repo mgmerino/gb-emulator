@@ -34,6 +34,8 @@ HRAM: Final = range(0xFF80, 0xFFFF)
 # Interrupts
 INTERRUPT_ENABLE: Final = 0xFFFF
 INTERRUPT_FLAG: Final = 0xFF0F
+# Only five interrupts exist; the top three bits are unwired and read as 1.
+INTERRUPT_FLAG_UNUSED: Final = 0xE0
 
 # Hardware mapping states
 OPEN_BUS: Final = 0xFF
@@ -44,3 +46,4 @@ DIVIDER: Final = 0xFF04
 TIMER_COUNTER: Final = 0xFF05
 TIMER_MODULO: Final = 0xFF06
 TIMER_CONTROL: Final = 0xFF07
+TIMER_REGISTERS: Final = range(DIVIDER, TIMER_CONTROL + 1)

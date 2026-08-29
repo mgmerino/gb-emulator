@@ -12,11 +12,16 @@
 # 0x0058  ├────────┤ 8 bytes  Serial
 # 0x0060  └────────┘ 8 bytes  Joypad
 
-from enum import IntEnum
+from __future__ import annotations
 
-from gameboy.bits import get_bit
-from gameboy.memory import MemoryDevice
+from enum import IntEnum
+from typing import TYPE_CHECKING
+
+from gameboy.bits import get_bit, set_bit
 from gameboy.memory_map import INTERRUPT_ENABLE, INTERRUPT_FLAG
+
+if TYPE_CHECKING:
+    from gameboy.memory import MemoryDevice
 
 
 class Interrupt(IntEnum):
@@ -42,3 +47,9 @@ def pending(bus: MemoryDevice) -> Interrupt | None:
             return interrupt
 
     return None
+
+
+def request(bus: MemoryDevice, interrupt: Interrupt) -> None:
+    i_flag = bus.read(INTERRUPT_FLAG)
+
+    bus.write(INTERRUPT_FLAG, set_bit(i_flag, interrupt))

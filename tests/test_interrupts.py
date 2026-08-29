@@ -3,7 +3,7 @@ from conftest import CpuRunning
 
 from gameboy.bits import get_bit
 from gameboy.cpu import CPU
-from gameboy.interrupts import Interrupt, pending
+from gameboy.interrupts import Interrupt, pending, request
 from gameboy.memory import Bus
 from gameboy.memory_map import INTERRUPT_ENABLE, INTERRUPT_FLAG
 
@@ -35,6 +35,41 @@ def test_pending(bus: Bus, ie: int, i_flag: int, expected: Interrupt | None) -> 
     bus.write(0xFF0F, i_flag)  # if
 
     assert pending(bus) is expected
+
+
+def test_request_sets_the_flag_for_its_source(bus: Bus) -> None:
+    request(bus, Interrupt.TIMER)
+
+    assert get_bit(bus.read(INTERRUPT_FLAG), Interrupt.TIMER)
+
+
+def test_request_leaves_the_other_pending_sources_alone(bus: Bus) -> None:
+    # IE is clear on purpose: `request` is the hardware saying "this happened",
+    # and what the program cares about is not its business. Consulting IE here
+    # erases the pending bit of every source the program has not enabled yet.
+    bus.write(INTERRUPT_ENABLE, 0x00)
+    bus.write(INTERRUPT_FLAG, 0b00001)
+
+    request(bus, Interrupt.TIMER)
+
+    assert get_bit(bus.read(INTERRUPT_FLAG), Interrupt.VBLANK)
+    assert get_bit(bus.read(INTERRUPT_FLAG), Interrupt.TIMER)
+
+
+def test_a_source_requested_while_disabled_is_found_once_it_is_enabled(
+    bus: Bus,
+) -> None:
+    # The sequence every ROM goes through: hardware is configured and starts
+    # signalling before the program enables the interrupt in IE.
+    bus.write(INTERRUPT_ENABLE, 0x00)
+
+    request(bus, Interrupt.TIMER)
+
+    assert pending(bus) is None
+
+    bus.write(INTERRUPT_ENABLE, 0x04)
+
+    assert pending(bus) is Interrupt.TIMER
 
 
 def _armed(cpu_running: CpuRunning, *program: int, ie: int, if_: int) -> CPU:
