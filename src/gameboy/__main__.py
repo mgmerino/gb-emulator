@@ -146,12 +146,18 @@ def trace_summary(instructions: int, cycles: int, reason: str) -> str:
     return f"--- {instructions} instructions, {cycles} T-cycles, {reason} ---"
 
 
-def trace(bus: MemoryDevice, instructions: int) -> Iterator[tuple[str, int]]:
+def trace(bus: Bus, instructions: int) -> Iterator[tuple[str, int]]:
     """Run the machine for `instructions` steps, yielding a line and its cost.
 
     The caller sums the cycles rather than the generator tracking them: a
     generator that stops early through an exception cannot report a total, and
     the loop that consumes it can.
+
+    Typed against `Bus` and not `MemoryDevice`: the protocol describes what the
+    CPU needs, which is four ways to move bytes. Driving the machine also means
+    handing the elapsed time to the devices, and that is not the CPU's business
+    — so it is this function, the one that assembles the machine, that has to
+    know what it is holding.
     """
     cpu = CPU(bus, Registers.post_boot())
 
@@ -161,6 +167,10 @@ def trace(bus: MemoryDevice, instructions: int) -> Iterator[tuple[str, int]]:
         address = cpu.registers.pc
 
         cycles = cpu.step()
+
+        # The instruction has run; now everything else catches up by exactly the
+        # time it took. This is the whole of "instruction-stepped" emulation.
+        bus.tick(cycles)
 
         # step() returned instead of raising, so the opcode is in one of the two
         # tables by definition. That is what makes decode's `[...]` safe where
