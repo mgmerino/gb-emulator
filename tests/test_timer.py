@@ -191,3 +191,107 @@ def test_a_tick_that_does_not_overflow_reports_nothing(timer: Timer) -> None:
 
     assert timer.tick(16) is False
     assert timer.tima == 1
+
+
+#
+# --- The three consequences of the falling-edge rule
+#
+# `timer.tick(N)` is how each of these arms the detector: it leaves the counter
+# where the test wants it *and* leaves `last_and` true, which is the half that a
+# direct assignment to `counter` would skip. Without it there is no 1 to fall
+# from and every one of these tests passes for the wrong reason.
+
+
+def test_writing_div_ticks_tima_when_the_watched_bit_was_set(timer: Timer) -> None:
+    timer.tac = 0b100  # 4096 Hz, watches bit 9
+    timer.tick(0x200)  # bit 9 goes up on this last sample
+
+    assert timer.tima == 0
+
+    timer.write(DIVIDER, 0x00)
+
+    assert timer.tima == 1
+
+
+def test_writing_div_does_not_tick_tima_when_the_watched_bit_was_clear(
+    timer: Timer,
+) -> None:
+    timer.tac = 0b100
+    timer.tick(0x100)  # bit 9 still down
+
+    timer.write(DIVIDER, 0x00)
+
+    assert timer.tima == 0
+
+
+def test_changing_the_tac_rate_can_tick_tima(timer: Timer) -> None:
+    timer.tac = 0b100
+    timer.tick(0x200)  # bit 9 up, bit 3 down
+
+    timer.write(TIMER_CONTROL, 0b101)  # now watching bit 3
+
+    assert timer.tima == 1
+
+
+def test_changing_the_tac_rate_does_not_tick_tima_when_the_new_bit_is_set_too(
+    timer: Timer,
+) -> None:
+    timer.tac = 0b100
+    timer.tick(0x208)  # bit 9 and bit 3 both up
+
+    timer.write(TIMER_CONTROL, 0b101)
+
+    assert timer.tima == 0
+
+
+def test_disabling_the_timer_ticks_tima_one_last_time(timer: Timer) -> None:
+    timer.tac = 0b100
+    timer.tick(0x200)
+
+    timer.write(TIMER_CONTROL, 0b000)  # the switch opens, the gate output drops
+
+    assert timer.tima == 1
+
+
+def test_disabling_the_timer_does_not_tick_tima_when_the_watched_bit_was_clear(
+    timer: Timer,
+) -> None:
+    timer.tac = 0b100
+    timer.tick(0x100)
+
+    timer.write(TIMER_CONTROL, 0b000)
+
+    assert timer.tima == 0
+
+
+def test_writing_tima_or_tma_never_touches_the_gate(timer: Timer) -> None:
+    timer.tac = 0b100
+    timer.tick(0x200)
+
+    timer.write(TIMER_COUNTER, 0x40)
+    timer.write(TIMER_MODULO, 0x40)
+
+    assert timer.tima == 0x40  # what was written, not 0x41
+
+
+def test_an_overflow_caused_by_a_write_is_reported(timer: Timer) -> None:
+    timer.tac = 0b100
+    timer.tima = 0xFF
+    timer.tma = 0x30
+    timer.tick(0x200)
+
+    assert timer.write(DIVIDER, 0x00) is True
+    assert timer.tima == 0x30
+
+
+def test_an_overflow_is_reported_even_when_it_is_not_the_last_edge(
+    timer: Timer,
+) -> None:
+    # 24 cycles is six samples at 262144 Hz and the edge lands on the fourth.
+    # A tick that assigns its result instead of accumulating it loses the report.
+    timer.tac = 0b101
+    timer.tima = 0xFF
+    timer.tma = 0x30
+
+    assert timer.tick(24) is True
+    assert timer.tima == 0x30
