@@ -1,6 +1,8 @@
 import pytest
 
 from gameboy.bits import get_bit
+from gameboy.cartridge import Cartridge
+from gameboy.cpu import CPU, Registers
 from gameboy.interrupts import Interrupt
 from gameboy.memory import Bus
 from gameboy.memory_map import (
@@ -351,3 +353,46 @@ def test_an_overflow_caused_by_a_write_also_requests_the_interrupt(bus: Bus) -> 
     bus.write(DIVIDER, 0x00)
 
     assert _timer_interrupt_requested(bus)
+
+
+def test_a_halted_cpu_is_woken_by_the_timer_and_runs_its_handler() -> None:
+    """The payoff of step 09: nothing here writes IF.
+
+    Every interrupt test before this one played the part of the hardware by
+    setting 0xFF0F itself. This one arms the timer the way a ROM does, halts,
+    and waits for time to pass.
+    """
+    program = [
+        0x3E,
+        0x04,  # LD A, 0x04
+        0xE0,
+        0xFF,  # LDH (0xFF), A   -> IE = the timer interrupt only
+        0x3E,
+        0xFF,  # LD A, 0xFF
+        0xE0,
+        0x05,  # LDH (0x05), A   -> TIMA, one edge short of overflowing
+        0x3E,
+        0x05,  # LD A, 0x05
+        0xE0,
+        0x07,  # LDH (0x07), A   -> TAC = enabled, 262144 Hz
+        0xFB,  # EI
+        0x76,  # HALT
+        0x18,
+        0xFE,  # JR -2           -> spin once we are back
+    ]
+    handler = [0x04, 0xD9]  # INC B ; RETI
+
+    image = bytearray(0x8000)
+    image[0x0050 : 0x0050 + len(handler)] = bytes(handler)
+    image[0x0100 : 0x0100 + len(program)] = bytes(program)
+
+    bus = Bus(Cartridge.from_bytes(bytes(image)), Timer())
+    cpu = CPU(bus, Registers.post_boot())
+
+    for _ in range(100):  # bounded: a halted CPU with nothing pending never wakes
+        bus.tick(cpu.step())
+
+    assert cpu.registers.b == 1  # the handler ran, exactly once
+    assert cpu.halted is False
+    assert cpu.registers.sp == 0xFFFE  # RETI put the stack back
+    assert cpu.registers.pc == 0x010E  # spinning on the JR after the HALT
