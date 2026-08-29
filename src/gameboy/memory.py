@@ -8,6 +8,7 @@ from typing import Protocol, final
 
 from gameboy import bits, memory_map
 from gameboy.interrupts import Interrupt, request
+from gameboy.serial import Serial
 from gameboy.timer import Timer
 
 
@@ -30,6 +31,9 @@ class Bus:
         self.ie = 0
         self.i_flag = 0
         self.timer = timer
+        # Constructed rather than injected: unlike the timer, the serial port
+        # has no post-boot state a caller could want to choose.
+        self.serial = Serial()
 
     def read(self, address: int) -> int:
         masked_address = bits.u16(address)
@@ -43,6 +47,8 @@ class Bus:
                 return self.cartridge.read(masked_address)
             case _ if masked_address in memory_map.TIMER_REGISTERS:
                 return self.timer.read(masked_address)
+            case _ if masked_address in memory_map.SERIAL_REGISTERS:
+                return self.serial.read(masked_address)
             case memory_map.INTERRUPT_FLAG:
                 # Only five sources exist, so bits 7-5 are not wired to anything
                 # and an unwired line on this bus reads high.
@@ -78,6 +84,8 @@ class Bus:
             case _ if masked_address in memory_map.TIMER_REGISTERS:
                 if self.timer.write(masked_address, masked_value):
                     request(self, Interrupt.TIMER)
+            case _ if masked_address in memory_map.SERIAL_REGISTERS:
+                self.serial.write(masked_address, masked_value)
             case memory_map.INTERRUPT_FLAG:
                 self.i_flag = masked_value
             case _ if masked_address in memory_map.WRAM:
