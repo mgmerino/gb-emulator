@@ -3,6 +3,7 @@ from conftest import FakeCartridge
 
 from gameboy import memory_map
 from gameboy.memory import Bus
+from gameboy.memory_map import DIVIDER, TIMER_CONTROL, TIMER_COUNTER, TIMER_MODULO
 
 # ---------------------------------------------------------------------------
 # Console RAM
@@ -283,3 +284,35 @@ def test_write16_wraps_at_the_top_of_memory(bus: Bus) -> None:
 
     assert bus.read(memory_map.INTERRUPT_ENABLE) == 0x34
     assert bus.read(0x0000) == 0xAA
+
+
+def test_the_timer_page_routes_to_the_timer(bus: Bus) -> None:
+    bus.write(TIMER_COUNTER, 0x11)
+    bus.write(TIMER_MODULO, 0x22)
+
+    assert bus.timer.tima == 0x11
+    assert bus.timer.tma == 0x22
+    assert bus.read(TIMER_COUNTER) == 0x11
+
+
+def test_the_timer_page_does_not_fall_through_to_the_io_array(bus: Bus) -> None:
+    # 0xFF04-0xFF07 sit inside the IO range, so the timer branch only ever runs
+    # if it comes first in the match. If it does not, this write lands in the
+    # generic byte array and the device never sees it.
+    bus.write(TIMER_COUNTER, 0x11)
+
+    assert bus.io[TIMER_COUNTER - 0xFF00] == 0x00
+
+
+def test_reading_div_through_the_bus_asks_the_timer(bus: Bus) -> None:
+    bus.timer.counter = 0x0A32
+
+    assert bus.read(DIVIDER) == 0x0A
+
+
+def test_writing_tac_through_the_bus_reads_back_with_its_unused_bits_set(
+    bus: Bus,
+) -> None:
+    bus.write(TIMER_CONTROL, 0x05)
+
+    assert bus.read(TIMER_CONTROL) == 0xFD

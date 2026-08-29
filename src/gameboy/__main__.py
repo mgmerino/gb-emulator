@@ -15,6 +15,7 @@ from gameboy.cpu import CPU, Registers, UnknownOpcodeError
 from gameboy.encoding import Instruction
 from gameboy.instructions import CB_OPCODES, OPCODES
 from gameboy.memory import Bus, MemoryDevice
+from gameboy.timer import Timer
 
 type Row = tuple[int, int, str]
 BYTES_PER_ROW = 16
@@ -203,7 +204,7 @@ def main() -> int:
             f"{args.dump + args.length:#06x} ({args.length} bytes)"
         )
         print("--- BEGIN ---")
-        print(dump(Bus(cartridge), args.dump, args.length))
+        print(dump(Bus(cartridge, Timer()), args.dump, args.length))
         print("--- END ---\n")
     elif args.trace is not None:
         executed = 0
@@ -212,7 +213,7 @@ def main() -> int:
         exit_code = 0
 
         try:
-            for line, cycles in trace(Bus(cartridge), args.trace):
+            for line, cycles in trace(Bus(cartridge, Timer()), args.trace):
                 print(line)
                 executed += 1
                 total_cycles += cycles
