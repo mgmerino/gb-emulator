@@ -41,6 +41,13 @@ INTERRUPT_FLAG_UNUSED: Final = 0xE0
 OPEN_BUS: Final = 0xFF
 PROHIBITED_READ: Final = 0x00
 
+# Serial link cable
+SERIAL_DATA: Final = 0xFF01
+SERIAL_CONTROL: Final = 0xFF02
+SERIAL_REGISTERS: Final = range(SERIAL_DATA, SERIAL_CONTROL + 1)
+# Only bits 7 and 0 exist on a DMG; the rest are unwired and read as 1.
+SERIAL_CONTROL_UNUSED: Final = 0x7E
+
 # Timer
 DIVIDER: Final = 0xFF04
 TIMER_COUNTER: Final = 0xFF05
