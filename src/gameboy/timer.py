@@ -11,30 +11,68 @@ from gameboy.memory_map import DIVIDER, TIMER_CONTROL, TIMER_COUNTER, TIMER_MODU
 # | 0xFF06 | TMA  | the timer modulo. What TIMA reloads to when it overflows
 # | 0xFF07 | TAC  | the timer control. On/off, and which of four rates
 #
-# DIV:
-# Besides the timer counter (TIMA), there is a *internal* counter. The top byte is what
-# DIV shows.
+# The internal counter:
+# ┌──────────────── DIV ────────────────┐
+# │                                     │
+# ┌────┬────┬────┬────┬────┬────┬───┬───┬───┬───┬───┬───┬───┬───┬───┬───┐
+# │ 15 │ 14 │ 13 │ 12 │ 11 │ 10 │▒9▒│ 8 │▒7▒│ 6 │▒5▒│ 4 │▒3▒│ 2 │ 1 │ 0 │
+# └────┴────┴────┴────┴────┴────┴─┬─┴───┴─┬─┴───┴─┬─┴───┴─┬─┴───┴───┴───┘
+#                                 │       │       │       └─ 262144 Hz
+#                                 │       │       │
+#                                 │       │       └─ 65536 Hz
+#                                 │       │
+#                                 │       └─ 16384 Hz
+#                                 │
+#                                 └─ 4096 Hz
 #
-# TAC:
+# TIMA: counts based on the *internal* counter. That counter has 16 bits, and those bits
+# represent the following:
+# - The top byte is what DIV shows
+# - The bits 9, 7, 5 and 3 are the possible rates at which TIMA counts. TAC register will
+#   select the desired speed (read below). Hardware-wise, a multiplexer makes this
+#   possible. The output is then connected to the AND gate to evaluate, using the enable
+#   bit of TAC, if there is a falling edge.
+#
+# The signal path, and why TAC shows up twice in it:
+#
+#   ┌───────────────────────────┐
+#   │ counter · 16 bits · +1/cy │──── bits 15-8 ────────────► DIV · 0xFF04
+#   └─────────────┬─────────────┘
+#                 │ bit 9 / 7 / 5 / 3
+#                 ▼
+#             ┌───────┐
+#             │  MUX  │◄──── TAC bits 1-0 · which bit is watched
+#             └───┬───┘
+#                 ▼
+#             ┌───────┐
+#             │  AND  │◄──── TAC bit 2 · the switch
+#             └───┬───┘
+#                 ▼
+#         did it fall 1 → 0 ?  (last_and remembers the previous sample)
+#                 │
+#                 ▼
+#            TIMA + 1 ──── on overflow ───► TIMA = TMA, and IF bit 2 · 0xFF0F
+#
+# TAC: control bits for enabling TIMA and selecting the clock speed.
 # Only the lowest 3 bits exist. Bits 7-3 are unused: ignored on write, read as 1.
 # 0xFF07 byte:  │ 7  6  5  4  3 │ 2 │ 1  0
 #               └──── unused ───┘ │   └──┴── clock select
 #                                 └── enable
 # Enable: Controls whether TIMA is incremented. Note that DIV is always counting,
-# regardless of this bit.
+# regardless of this bit. The output is connected to the AND gate.
 #
 # Clock select: Controls the frequency at which TIMA is incremented, as follows. Notice
 # that the four rates are *not* mapped to binary values in speed order, as one might
-# expect:
-# ┌──────┬─────┬───────────────┐
-# │ Hex  │ Bin │ Hardware      │
-# ├──────┼─────┼───────────────┤
-# │ 0x00 │ 000 │ off           │
-# │ 0x04 │ 100 │ on, 4096 Hz   │
-# │ 0x05 │ 101 │ on, 262144 Hz │
-# │ 0x06 │ 110 │ on, 65536 Hz  │
-# │ 0x07 │ 111 │ on, 16384 Hz  │
-# └──────┴─────┴───────────────┘
+# expect. This is what *selects* in the multiplexer the target value.
+# ┌──────┬─────┬───────────────┬────────────────┐
+# │ Hex  │ Bin │ Hardware      │ Bit in counter │
+# ├──────┼─────┼───────────────┼────────────────┤
+# │ 0x00 │ 000 │ off           │ 9, but gated   │
+# │ 0x04 │ 100 │ on, 4096 Hz   │ 9              │
+# │ 0x05 │ 101 │ on, 262144 Hz │ 3              │
+# │ 0x06 │ 110 │ on, 65536 Hz  │ 5              │
+# │ 0x07 │ 111 │ on, 16384 Hz  │ 7              │
+# └──────┴─────┴───────────────┴────────────────┘
 
 _TAC_UNUSED: Final = 0xF8  # 5 bits high, 3 low
 _WATCHED_BITS: Final = (9, 3, 5, 7)  # indexed by TAC bits 1-0, in encoding order
