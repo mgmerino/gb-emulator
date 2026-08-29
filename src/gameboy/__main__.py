@@ -146,12 +146,12 @@ def trace_summary(instructions: int, cycles: int, reason: str) -> str:
     return f"--- {instructions} instructions, {cycles} T-cycles, {reason} ---"
 
 
-def trace(bus: Bus, instructions: int) -> Iterator[tuple[str, int]]:
-    """Run the machine for `instructions` steps, yielding a line and its cost.
+def run(bus: Bus, instructions: int) -> Iterator[tuple[CPU, int, int]]:
+    """Drive the machine, yielding the CPU, the address it fetched from, and
+    what the step cost.
 
-    The caller sums the cycles rather than the generator tracking them: a
-    generator that stops early through an exception cannot report a total, and
-    the loop that consumes it can.
+    Both CLI modes go through here, because two loops that tick differently is a
+    bug nobody finds until the PPU is drawing.
 
     Typed against `Bus` and not `MemoryDevice`: the protocol describes what the
     CPU needs, which is four ways to move bytes. Driving the machine also means
@@ -172,6 +172,17 @@ def trace(bus: Bus, instructions: int) -> Iterator[tuple[str, int]]:
         # time it took. This is the whole of "instruction-stepped" emulation.
         bus.tick(cycles)
 
+        yield (cpu, address, cycles)
+
+
+def trace(bus: Bus, instructions: int) -> Iterator[tuple[str, int]]:
+    """Run the machine, yielding a formatted line and its cost.
+
+    The caller sums the cycles rather than the generator tracking them: a
+    generator that stops early through an exception cannot report a total, and
+    the loop that consumes it can.
+    """
+    for cpu, address, cycles in run(bus, instructions):
         # step() returned instead of raising, so the opcode is in one of the two
         # tables by definition. That is what makes decode's `[...]` safe where
         # step itself needs `.get`.
@@ -197,6 +208,12 @@ def main() -> int:
     parser.add_argument("--dump", type=parse_address, default=None)
     parser.add_argument("--length", type=int, default=64)
     parser.add_argument("--trace", type=int, default=None)
+    parser.add_argument(
+        "--run",
+        type=int,
+        default=None,
+        help="run without per-instruction output, then print the serial log",
+    )
     args = parser.parse_args()
 
     try:
@@ -232,6 +249,30 @@ def main() -> int:
             # other CLI errors are reported and leave the traceback out.
             reason = str(error)
             exit_code = 1
+
+        print(trace_summary(executed, total_cycles, reason))
+        return exit_code
+    elif args.run is not None:
+        bus = Bus(cartridge, Timer())
+        executed = 0
+        total_cycles = 0
+        reason = f"reached the {args.run} instruction limit"
+        exit_code = 0
+
+        try:
+            for _cpu, _address, cycles in run(bus, args.run):
+                executed += 1
+                total_cycles += cycles
+        except UnknownOpcodeError as error:
+            reason = str(error)
+            exit_code = 1
+        except KeyboardInterrupt:
+            # A ROM that never finishes still has something to say.
+            reason = "interrupted"
+
+        if bus.serial.output:
+            print("--- serial ---")
+            print(bus.serial.text)
 
         print(trace_summary(executed, total_cycles, reason))
         return exit_code
