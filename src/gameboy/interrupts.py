@@ -14,7 +14,7 @@
 
 from enum import IntEnum
 
-from gameboy.bits import get_bit
+from gameboy.bits import get_bit, set_bit
 from gameboy.memory import MemoryDevice
 from gameboy.memory_map import INTERRUPT_ENABLE, INTERRUPT_FLAG
 
@@ -42,3 +42,9 @@ def pending(bus: MemoryDevice) -> Interrupt | None:
             return interrupt
 
     return None
+
+
+def request(bus: MemoryDevice, interrupt: Interrupt) -> None:
+    i_flag = bus.read(INTERRUPT_FLAG)
+
+    bus.write(INTERRUPT_FLAG, set_bit(i_flag, interrupt))
