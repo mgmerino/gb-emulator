@@ -2,18 +2,15 @@
 
 ## Goal
 
-The README has ended on the same paragraph for two steps now:
+Be able to read from PPU registers.
 
-> Nothing writes `LY` yet, so `CP` never matches. An endless loop here is the
-> correct outcome, and it ends in Step 11.
+Tetris goes at `0x0233` reading `0xFF44` and comparing it to `148`, the fifth
+line of VBlank. It is waiting for the LCD to get out of the way.
 
-This is that step.
-
-Tetris sits at `0x0233` reading `0xFF44` and comparing it to `148`. It is
-waiting for the LCD to reach the first line of VBlank, because that is the only
-moment a program can touch video memory without fighting the hardware for it.
-Give it a register that counts, and the loop ends — and what the ROM does two
-instructions later is the reason this step is bigger than "make `LY` go up".
+The loop ends when `LY` reaches 148. Two instructions later Tetris writes `0x03`
+to `LCDC`, which clears bit 7 and switches the LCD off. So a PPU that only counts
+`LY` gets the ROM out of one wait loop and into a worse one. That is why this
+step is bigger than "make `LY` go up".
 
 Seven registers join the map:
 
@@ -27,53 +24,38 @@ Seven registers join the map:
 | `0xFF45` | `LYC` | the line a ROM wants to be told about |
 | `0xFF47` | `BGP` | background palette: four indices to four shades |
 
-And one output the project has never had: **160×144 bytes that mean something
-when you look at them.**
+Now **160×144 bytes means something**. Three things become observable that
+weren't before:
 
-Three things become observable that were not before:
-
-- a ROM that gets past its VBlank wait, and starts configuring a machine it
-  believes is real
+- ROM gets past its VBlank wait, and starts configuring the machine
 - a second device raising interrupts, one of which (`VBlank`) is the one every
-  game is actually built around
-- a picture. Not a register dump, not a serial log — a picture, of tiles the ROM
-  put in VRAM itself
-
-> **Visual companion:** two things in this step draw far better than they read —
-> the two bytes of a tile row becoming eight two-bit pixels, and the two tile
-> data addressing modes sharing one region from opposite ends. Ask if theory
-> sections 6 and 7 do not click.
+  game is built around
+- a picture, made of tiles the ROM put in VRAM
 
 ---
 
 ## Theory
 
-### 1. What the PPU is, and the shortcut this step takes
+### 1. What is the PPU
 
-The Picture Processing Unit is a second processor. It has its own clock, its own
-memory (VRAM and OAM), and its own program, which is fixed in silicon: draw 144
-lines of 160 pixels, then rest, then do it again, forever, whether or not anyone
-is watching.
+The Picture Processing Unit is a second processor. It has its own clock, memory
+(VRAM and OAM), and its own program, which is fixed in silicon: draw 144 lines
+of 160 pixels, then rest, then do it again, forever.
 
-It is not a frame buffer that the CPU fills in. It is a machine that walks the
-screen at a fixed rate and *fetches* what it needs as it goes. That distinction
-is the source of every constraint in this step. The CPU cannot write VRAM at an
-arbitrary moment, because the PPU may be reading it. The screen cannot be
-composed at an arbitrary moment, because a ROM is allowed to change `SCX`
-between two scanlines and expect the second one to move.
+It walks the screen at a fixed rate and *fetches* what it needs as it goes. The
+CPU cannot write VRAM at an arbitrary moment, because the PPU may be reading it.
+The screen cannot be composed at an arbitrary moment either, because a ROM is
+allowed to change `SCX` between two scanlines and expect the second one to move.
 
-Real hardware draws **one pixel per dot**, through a pipeline: a fetcher pulls
+The hardware draws **one pixel per dot**, through a pipeline: a fetcher pulls
 tile bytes into an 8-pixel FIFO, a shifter pops one pixel per dot onto the LCD.
-Reproducing that is how you get the hard cases right — mid-scanline `SCX`
-changes, the window turning on halfway across a line, the exact length of mode 3.
+Reproducing that is how you get the hard cases right: mid-scanline `SCX` changes,
+the window turning on halfway across a line, the exact length of mode 3.
 
-**We are not going to do that.** This step builds a *scanline renderer*: the PPU
-tracks its position with a dot counter, and when a line's drawing period ends, it
+**We are not going to do that.** This step builds a *scanline renderer*. The PPU
+tracks its position with a dot counter, and when a line's drawing period ends it
 computes all 160 of that line's pixels at once, from whatever the registers say
-at that instant.
-
-The trade is worth naming precisely, because it is the same trade Step 09 made
-and it will be the one Step 13 revisits:
+at that instant. Step 13 revisits the trade:
 
 | | Dot renderer | Scanline renderer |
 | --- | --- | --- |
@@ -83,14 +65,13 @@ and it will be the one Step 13 revisits:
 | Lines of code | several hundred | several dozen |
 
 Almost no DMG game changes `SCX` mid-line. The ones that do are doing it
-deliberately, to warp a status bar or shear an image, and they are famous for it.
-A scanline renderer draws every commercial game correctly enough to play, and it
-is the right amount of machine to build first.
+deliberately, to warp a status bar or shear an image. A scanline renderer draws
+every commercial game correctly enough to play.
 
-### 2. The dot clock, and why 70224 was already familiar
+### 2. The dot clock
 
 The PPU is clocked by the same 4.194304 MHz crystal as everything else. Its unit
-of time is called a **dot**, and one dot is one T-cycle — the same T-cycles the
+of time is called a **dot**, and one dot is one T-cycle: the same T-cycles the
 opcode table has been reporting since Step 04, and the same ones `bus.tick`
 already hands to the timer.
 
@@ -102,11 +83,11 @@ already hands to the timer.
 ```
 
 The screen is 144 lines tall, but the PPU counts to 154. The ten extra lines are
-VBlank: no pixels are produced, VRAM is free, and the CPU has 4560 dots —
-roughly 1140 machine cycles — to do everything that touches video memory.
+VBlank: no pixels are produced, VRAM is free, and the CPU has 4560 dots, roughly
+1140 machine cycles, to do everything that touches video memory.
 
 70224 is the number the trace summary has been printed against since Step 04.
-That was not decoration; it was this step, waiting.
+This is what it was for.
 
 ### 3. The four modes
 
@@ -136,13 +117,11 @@ VBlank is a fourth. `STAT` bits 1-0 report which one is current.
 | 0 | HBlank | the rest of 456 | nothing. Idling to the end of the line | free | free |
 | 1 | VBlank | 4560 dots | nothing, for ten lines | free | free |
 
-Two notes on that table.
-
 Mode 3 is variable on hardware: it stretches when `SCX` is not a multiple of 8,
 and when sprites are on the line. Mode 0 shrinks by exactly as much, so the line
 is always 456. **This project fixes mode 3 at its 172-dot minimum**, which makes
-mode 0 always 204. That is a lie, and it is the lie a scanline renderer is
-already committed to.
+mode 0 always 204. It is an approximation the scanline renderer was already
+committed to.
 
 The "blocked" columns describe hardware that refuses the CPU: a read of VRAM
 during mode 3 returns `0xFF` and a write is dropped. **This project does not
@@ -150,18 +129,18 @@ model that either**, and theory section 13 says why.
 
 ### 4. `LY`, `LYC`, and `STAT`
 
-`LY` is the line the PPU is on. It is the single most-read register in the
-machine, because it is the only clock a program has that is synchronised to the
-display. A ROM that wants to do something at a particular point in the frame
-polls `LY` until it matches — which is exactly what Tetris is doing at `0x0233`.
+`LY` is the line the PPU is on, and it is the only clock a program has that is
+synchronised to the display. A ROM that wants to do something at a particular
+point in the frame polls `LY` until it matches, which is what Tetris is doing at
+`0x0233`.
 
-`LY` is **read-only**. Writing it does nothing at all. This matters more than it
-sounds: a bus that lets `LY` be written will let a stray `LD (HL), A` desynchronise
-the display from the machine, and nothing will point at the cause.
+`LY` is **read-only**. Writing it does nothing at all. A bus that lets `LY` be
+written will let a stray `LD (HL), A` desynchronise the display from the machine,
+and nothing in the output will point at the cause.
 
 `LYC` is the ROM's side of a comparison the hardware performs for it. On every
 line, the PPU checks `LY == LYC` and reports the answer in `STAT` bit 2. A game
-uses this to get an interrupt on one specific scanline — the classic use is a
+uses this to get an interrupt on one specific scanline. The classic use is a
 status bar that does not scroll with the rest of the screen.
 
 ```
@@ -175,31 +154,28 @@ status bar that does not scroll with the rest of the screen.
                 └────────────────────────────── unused, reads 1
 ```
 
-`STAT` is the first register in this project where read and write see genuinely
-different bits. Bits 2-0 are the PPU reporting to the ROM; bits 6-3 are the ROM
-configuring the PPU. A write must land on bits 6-3 and leave 2-0 alone; a read
-must assemble 2-0 from live state rather than from whatever was last written.
+`STAT` is the first register in this project where read and write see different
+bits. Bits 2-0 are the PPU reporting to the ROM; bits 6-3 are the ROM configuring
+the PPU. A write must land on bits 6-3 and leave 2-0 alone; a read must assemble
+2-0 from live state rather than from whatever was last written.
 
-This is worth doing carefully, because the failure is quiet. A `STAT` that stores
-the whole byte on write will read back a *stale* mode, and a ROM that polls
-`STAT` for mode 0 instead of polling `LY` will hang — with no error, on a
-register that looks right in a dump.
+The failure here is quiet. A `STAT` that stores the whole byte on write will read
+back a *stale* mode, and a ROM that polls `STAT` for mode 0 instead of polling
+`LY` will hang, with no error, on a register that looks right in a dump.
 
 ### 5. Two interrupts, and a rising edge on an OR
 
 The PPU raises two of the five interrupts.
 
 **`VBlank`, `IF` bit 0.** Fires once per frame, at the moment `LY` becomes 144.
-Unconditional — there is no enable bit in `STAT` for it, only the usual `IE`.
-This is the heartbeat every game is built on: sixty times a second, "the screen
-is yours for the next 4560 dots".
+Unconditional: there is no enable bit in `STAT` for it, only the usual `IE`. This
+is the heartbeat every game is built on, sixty times a second telling it the
+screen is free for the next 4560 dots.
 
-**`LCD_STAT`, `IF` bit 1.** Fires on four selectable conditions, and it does not
-fire the way you would first guess.
-
-The four conditions are OR'd into a single internal signal — the **STAT interrupt
-line** — and the interrupt is requested when that line goes from low to high.
-Not while it is high. On the *transition*.
+**`LCD_STAT`, `IF` bit 1.** Fires on four selectable conditions. The four are
+OR'd into a single internal signal, the **STAT interrupt line**, and the
+interrupt is requested when that line goes from low to high. Not while it is
+high, only on the transition.
 
 ```
    LY == LYC ──── AND ──── STAT bit 6 ──┐
@@ -214,18 +190,15 @@ Not while it is high. On the *transition*.
 Compare that with the diagram at the top of `timer.py`. The timer watches one
 bit through an AND and fires on the **falling** edge. The PPU watches four
 conditions through an OR and fires on the **rising** edge. Different polarity,
-different gate, identical discipline: keep the previous sample in a field,
-compare, act on the change and not on the level.
+different gate, same discipline: keep the previous sample in a field, compare,
+act on the change and not on the level.
 
-The consequence has a name — **STAT blocking**. If mode 0 is selected and the
-line is already high because `LY == LYC` just became true, entering mode 0 raises
-no interrupt, because the line was never low in between. Games rely on this. An
+The consequence is called **STAT blocking**. If mode 0 is selected and the line
+is already high because `LY == LYC` just became true, entering mode 0 raises no
+interrupt, because the line was never low in between. Games rely on this. An
 implementation that requests `LCD_STAT` on every condition it notices will
 deliver several interrupts per line instead of one, and a ROM whose handler
 advances a counter will run its frame logic four times too often.
-
-You already know how to write this. That is the point of having done the timer
-first.
 
 ### 6. A tile is sixteen bytes and two bitplanes
 
@@ -233,8 +206,8 @@ The DMG has no pixels in the ordinary sense. It has **tiles**: 8×8 blocks, four
 colours, stored at `0x8000`–`0x97FF`. 384 of them fit.
 
 Four colours is two bits per pixel, so a tile is 8 × 8 × 2 = 128 bits = 16 bytes.
-The interesting part is how those two bits are laid out. Not as pairs — as two
-separate **bitplanes**, interleaved by row:
+The two bits of a pixel are not stored together. They live in two separate
+**bitplanes**, interleaved by row:
 
 ```
 tile at address T:
@@ -256,15 +229,15 @@ decoding one row:
               leftmost      rightmost
 ```
 
-Two things in that picture are the classic mistakes.
+Two mistakes are common here.
 
 The first byte of a pair is the **low** plane and the second is the **high**
-plane. Get them the wrong way round and colours 1 and 2 swap everywhere — which
-looks *almost* right, which is why it survives a glance.
+plane. Get them the wrong way round and colours 1 and 2 swap everywhere, which
+looks almost right and so survives a glance.
 
 Bit 7 is the **leftmost** pixel. The pixel at x-offset `n` within a tile lives in
-bit `7 - n`. Get this wrong and every tile is mirrored, which looks obviously
-wrong and is therefore the easier of the two bugs to have.
+bit `7 - n`. Get this wrong and every tile is mirrored, which is obvious on
+sight, so it is the easier of the two to catch.
 
 ### 7. Two tile maps, and two ways to name a tile
 
@@ -287,8 +260,7 @@ screen shows a 160×144 window onto it.
 Which of the two maps the background uses is `LCDC` bit 3. Two maps exist so a
 game can build the next screen in one while the other is being displayed.
 
-Now the part that trips everyone. **The tile index is interpreted in one of two
-ways**, chosen by `LCDC` bit 4:
+**The tile index is interpreted in one of two ways**, chosen by `LCDC` bit 4:
 
 ```
 LCDC bit 4 = 1        the "0x8000 method": index is UNSIGNED, 0–255
@@ -309,19 +281,17 @@ LCDC bit 4 = 0        the "0x8800 method": index is SIGNED, −128–127
    0x97F0 └─────────┘  index 127  (0x7F)      address = 0x9000 + signed × 16
 ```
 
-The name "the `0x8800` method" is the historical one and it is actively
-misleading: the base address you compute from is `0x9000`, not `0x8800`. `0x8800`
-is merely where the region starts, which is where index `0x80` lands once you
-read it as −128.
+The name "the `0x8800` method" is the historical one and it is misleading. The
+base address you compute from is `0x9000`, not `0x8800`. `0x8800` is where the
+region starts, which is where index `0x80` lands once you read it as −128.
 
-`to_signed8` in `bits.py` has been sitting there since Step 01 for `JR`. This is
-its second caller.
+`to_signed8` in `bits.py` has been there since Step 01 for `JR`. This is its
+second caller.
 
-Why two methods at all: the two ranges overlap at `0x8800`–`0x8FFF`, so tiles a
-game wants available under both addressing modes are stored once, in the middle,
-and reachable from either end. Sprites, when they arrive in Step 12, always use
-the `0x8000` method regardless of `LCDC` bit 4 — a detail to file away, not to
-implement yet.
+The two ranges overlap at `0x8800`–`0x8FFF`, which is the point of having two
+methods: tiles a game wants under both addressing modes are stored once, in the
+middle, and reachable from either end. Sprites always use the `0x8000` method
+regardless of `LCDC` bit 4. That is Step 12's problem, not this one's.
 
 ### 8. `LCDC`, bit by bit
 
@@ -337,16 +307,15 @@ implement yet.
                 └────────────────────────────── LCD & PPU enable
 ```
 
-This step uses bits 7, 4, 3 and 0. The other four are stored and ignored, which
-is not a stub — a ROM writes the whole byte and must read the whole byte back.
+This step uses bits 7, 4, 3 and 0. The other four are stored and ignored,
+because a ROM writes the whole byte and must read the whole byte back.
 
 Note the polarity of bit 4 against the diagram in section 7: **1 means `0x8000`**,
-the unsigned method. It reads backwards from the address order, and it is the
-single most-transposed bit in the register.
+the unsigned method. It reads backwards from the address order.
 
-Bit 0 on a DMG means "draw the background at all". When it is clear, the
-background and window are blank — the screen goes white — regardless of what is
-in VRAM. Tetris clears it, deliberately, before it has loaded any tiles.
+Bit 0 on a DMG means "draw the background at all". When it is clear the
+background and window are blank, the screen goes white, whatever is in VRAM.
+Tetris clears it deliberately, before it has loaded any tiles.
 
 ### 9. Scrolling is modular arithmetic
 
@@ -372,8 +341,8 @@ in VRAM. Tetris clears it, deliberately, before it has loaded any tiles.
 
 Both axes **wrap**. The background is a torus: scroll off the right edge and you
 come back on the left, off the bottom and you come back on the top. There is no
-clipping and no edge — which is why a Game Boy can scroll an infinite level
-through a 1 KiB map.
+clipping and no edge, which is how a Game Boy scrolls an endless level through a
+1 KiB map.
 
 For pixel `x` of line `LY`, the arithmetic is:
 
@@ -392,8 +361,8 @@ For pixel `x` of line `LY`, the arithmetic is:
 ```
 
 The two `mod 256` are the whole of scrolling. The two `mod 8` are the whole of
-tiling. Every one of those five divisions is by a power of two, which is not a
-coincidence — it is why the arithmetic is free in hardware.
+tiling. Every one of those five divisions is by a power of two, which is why the
+arithmetic is free in hardware.
 
 ### 10. `BGP`, one more indirection
 
@@ -412,15 +381,15 @@ shade  0 = white   1 = light grey   2 = dark grey   3 = black
 `shade = (BGP >> (index × 2)) & 0b11`.
 
 The indirection exists so a game can fade the screen, flash it, or invert it
-without touching a single byte of VRAM — one write to `BGP` recolours everything
+without touching a single byte of VRAM. One write to `BGP` recolours everything
 on screen in four T-cycles. Tetris writes `0xE4`, which is `11 10 01 00`: the
 identity mapping, index *n* to shade *n*.
 
-Index 0 is worth naming separately. It is the background's "nothing here" colour,
-and Step 12 will need to know, per pixel, whether the background's colour *index*
-was 0 — that is how a sprite decides whether it is behind or in front. The shade
-cannot answer that question, because `BGP` can map index 0 to black. Keep this in
-mind when choosing what the renderer stores.
+Index 0 is the background's "nothing here" colour. Step 12 needs to know, per
+pixel, whether the background's colour *index* was 0, because that is how a
+sprite decides whether it is behind or in front. The shade cannot answer that,
+since `BGP` can map index 0 to black. Keep it in mind when choosing what the
+renderer stores.
 
 ### 11. Turning the LCD off, which Tetris does on line 148
 
@@ -430,8 +399,7 @@ When it goes to 0: `LY` resets to 0 and stays there, the mode goes to 0, the dot
 counter resets, no interrupts are raised, and the screen is blank. When it goes
 back to 1, the PPU restarts at the top of a fresh frame.
 
-This is not an edge case to handle for completeness. It is the very next thing
-the ROM in `~/games` does:
+It is the next thing Tetris does:
 
 ```
 022F: 3E 80    LD  A, 0x80      ; LCD on, everything else off
@@ -448,17 +416,16 @@ the ROM in `~/games` does:
 0245: E0 49    LDH (0xFF49), A  ; OBP1
 ```
 
-Read that sequence for what it is: **turn the LCD on, wait for VBlank, turn it
-off.** The wait is not for VBlank's sake. It is because switching the LCD off
-outside VBlank is documented as damaging on real hardware, so every game does the
-polite thing first. Only then does it load palettes and start filling VRAM, with
-the PPU stopped and the whole address space to itself.
+The sequence is: turn the LCD on, wait for VBlank, turn it off. The wait exists
+because switching the LCD off outside VBlank is documented as damaging on real
+hardware, so every game does the polite thing first. Only then does it load
+palettes and start filling VRAM, with the PPU stopped and the whole address space
+to itself.
 
-Which means the LCD-off path is on the critical path for this step. Get `LY`
-counting and forget bit 7, and the ROM will get past `0x0237`, disable the LCD,
-and then be shown an `LY` that keeps advancing anyway — and the next wait loop it
-writes will behave in a way that no amount of staring at your renderer will
-explain.
+So the LCD-off path is not optional. Get `LY` counting and forget bit 7, and the
+ROM will get past `0x0237`, disable the LCD, and then be shown an `LY` that keeps
+advancing anyway. The next wait loop it writes will hang for a reason nowhere
+near your renderer.
 
 ### 12. Where the core stops
 
@@ -467,22 +434,19 @@ Design constraint 1 in `PLAN.md`:
 > The core is framework-independent. No pygame, no SDL, no I/O library inside
 > `gameboy/`. The core exposes a framebuffer and accepts button state.
 
-So the PPU's output is 160 × 144 = 23040 bytes, one per pixel, each `0`–`3`.
-Not RGB, not a PNG, not a file. A byte per pixel is the whole product, and every
-question about what grey means, what green means, how big the window is and how
-often it refreshes belongs to somebody else.
-
-That somebody is `__main__.py` for now. The CLI is the frontend layer today;
-Step 13 gives it a real one.
+So the PPU's output is 160 × 144 = 23040 bytes, one per pixel, each `0`–`3`. A
+byte per pixel is the whole product. What grey means, what green means, how big
+the window is and how often it refreshes all belong to the frontend, which is
+`__main__.py` for now. Step 13 gives it a real one.
 
 A byte per pixel also means the natural container is a `bytearray` rather than
-nested lists. Indexing is `y * 160 + x`, which is the same flattening the tile
-map arithmetic in section 9 already does.
+nested lists. Indexing is `y * 160 + x`, the same flattening the tile map
+arithmetic in section 9 already does.
 
 ### 13. What is deliberately not modelled
 
-Say these out loud now, in a comment at the top of `ppu.py`, the way `serial.py`
-says what the link cable does not do.
+Write these into a comment at the top of `ppu.py`, the way `serial.py` records
+what the link cable does not do.
 
 - **VRAM and OAM blocking.** During mode 3 a real CPU read of VRAM returns `0xFF`.
   Modelling it would make the emulator *stricter* than hardware in exactly the
@@ -495,17 +459,17 @@ says what the link cable does not do.
 - **The `LY == 153` quirk.** On hardware `LY` reads 0 for all but the first 4 dots
   of line 153. A handful of ROMs detect this. None of ours do.
 - **Sprites and the window.** Step 12. `LCDC` bits 6, 5, 2 and 1 are stored and
-  ignored, and that is a deliberate state, not an unfinished one.
+  ignored on purpose.
 
 The rule that has held since Step 03 still holds: an unimplemented read returns
 something plausible, an unimplemented write is dropped, nothing raises.
 
 ### 14. The state the boot ROM left behind
 
-The project skips the boot ROM and starts at `0x0100` with the registers the
-boot ROM would have left. The PPU needs the same treatment, and the values
-matter more here than they did for the timer — a game is entitled to assume the
-LCD is *already on*, because the boot ROM turned it on to draw the Nintendo logo.
+The project skips the boot ROM and starts at `0x0100` with the registers the boot
+ROM would have left. The PPU needs the same treatment. A game is entitled to
+assume the LCD is *already on*, because the boot ROM turned it on to draw the
+Nintendo logo.
 
 | Register | Post-boot | Meaning |
 | --- | --- | --- |
@@ -517,9 +481,9 @@ LCD is *already on*, because the boot ROM turned it on to draw the Nintendo logo
 | `LYC` | `0x00` | |
 | `BGP` | `0xFC` | `11 11 11 00` — index 0 white, everything else black |
 
-There is a related debt to settle here. Step 09 specified `Timer.post_boot()`
-with `DIV == 0xAB`; the class does not have it, and `__main__.py` builds a plain
-`Timer()`. `DIV` therefore starts at 0 in every run the CLI has ever done. Task 8
+There is a related debt to settle. Step 09 specified `Timer.post_boot()` with
+`DIV == 0xAB`; the class does not have it, and `__main__.py` builds a plain
+`Timer()`, so `DIV` starts at 0 in every run the CLI has ever done. Task 8
 collects all of this into one place.
 
 ### 15. Python concepts this step introduces
@@ -527,13 +491,12 @@ collects all of this into one place.
 - **`memoryview` and `.toreadonly()`.** Handing a caller your `bytearray`
   framebuffer hands them the ability to scribble on it. A read-only `memoryview`
   is a *view*, not a copy: no bytes move, and writes through it raise. Ruby has
-  no equivalent — `String#freeze` freezes the object, not a window onto it, and
-  `dup` copies. This is the first place in the project where "share without
-  copying, but read-only" is worth the vocabulary.
+  no equivalent. `String#freeze` freezes the object, not a window onto it, and
+  `dup` copies.
 - **`enum.IntFlag`.** `LCDC` is eight independent booleans in one byte, which is
   what `IntFlag` is for: named members that combine with `|` and test with `in`.
-  Whether it beats eight `@property`s named after Pan Docs is a genuine judgement
-  call, and task 2 asks you to make it rather than telling you the answer.
+  Whether it beats eight `@property`s named after Pan Docs is a judgement call.
+  Task 2 asks you to make it.
 - **Slice assignment on a `bytearray`.** `frame[start:start + 160] = line`
   replaces a run of bytes in one operation. It is the idiom for "write a
   scanline", and it is closer to `Array#[]=` with a range than to anything else
@@ -585,7 +548,7 @@ is a cast and not a lookup table.
 Add `post_boot()` per theory section 14.
 
 Write the "not modelled" comment from theory section 13 now, at the top of the
-file, before any of it is tempting to forget.
+file.
 
 **Acceptance:** `PPU.post_boot().lcdc == 0x91`, and `456`, `154` and `160` each
 appear exactly once in the module.
@@ -604,19 +567,18 @@ appear exactly once in the module.
 | `0xFF45` | `lyc` | `lyc` |
 | `0xFF47` | `bgp` | `bgp` |
 
-Per theory section 4, `STAT` is the one that repays care. Read assembles; write
-masks. Neither touches the other's bits.
+Per theory section 4: `STAT` read assembles, `STAT` write masks. Neither touches
+the other's bits.
 
 Put the addresses in `memory_map.py` with the rest of the map, and decide there
-what range the bus will match on — theory section 8 lists four `LCDC` bits this
-step does not use, and `0xFF46`, `0xFF48`–`0xFF4B` belong to Step 12. Leaving
-them to fall through to the bus's existing `io` array gives correct read-back for
-free; claiming them now means writing storage for registers nothing reads. Prefer
-the first.
+what range the bus will match on. `0xFF46` and `0xFF48`–`0xFF4B` belong to
+Step 12. Letting them fall through to the bus's existing `io` array gives correct
+read-back for free; claiming them now means writing storage for registers nothing
+reads. Prefer the first.
 
-This is also where task 1's `IntFlag`-or-properties decision gets made, because
-this is the first code that has to ask "is bit 4 set". Write it the way that
-makes `_tile_data_base` readable in task 6, and say in a comment why.
+Task 1's `IntFlag`-or-properties decision gets made here, because this is the
+first code that has to ask "is bit 4 set". Write it the way that makes
+`_tile_data_base` readable in task 6, and say in a comment why.
 
 **Acceptance:** writing `0xFF` to `0xFF44` leaves `LY` unchanged. Writing `0xFF`
 to `0xFF41` and reading it back gives bits 6-3 set, bit 7 set, and bits 2-0
@@ -635,11 +597,11 @@ def tick(self, cycles: int) -> tuple[Interrupt, ...]:
 
 Return `()` for now; task 4 fills it.
 
-Step 09's question 3 asked what shape a device with two interrupts should return,
-and this is the answer being proposed: a tuple, empty on the common path, because
-`()` is a singleton in CPython and costs nothing. `Timer.tick` keeps its `bool` —
-one source, one answer, and changing it would be churn without a reader. If you
-disagree, the asymmetry is worth an argument; have it now rather than in Step 12.
+Step 09's question 3 asked what shape a device with two interrupts should return.
+The answer proposed here is a tuple, empty on the common path, since `()` is a
+singleton in CPython and costs nothing. `Timer.tick` keeps its `bool`: one source,
+one answer, and changing it would be churn without a reader. If you disagree,
+settle it now rather than in Step 12.
 
 The machine, per theory section 3:
 
@@ -657,16 +619,15 @@ The machine, per theory section 3:
         otherwise            → HBLANK
 ```
 
-Deriving the mode from the position rather than tracking it as a state machine
-with transitions is the simpler of the two shapes, and it is correct because the
-mode genuinely is a pure function of `(ly, dots)`. The transitions still matter —
-tasks 4 and 7 need to know when one *happened* — so compare the newly derived
-mode against the stored one and you have the edge, with no duplicate state.
+Deriving the mode from the position is simpler than tracking a state machine with
+transitions, and it is correct because the mode is a pure function of
+`(ly, dots)`. Tasks 4 and 7 still need to know when a transition *happened*, so
+compare the newly derived mode against the stored one. That gives you the edge
+with no duplicate state.
 
-The `while` rather than an `if` is deliberate. The longest instruction is 24
-T-cycles and a line is 456, so it can only ever run once today — but write the
-loop, because Step 15's `HALT` in a bank-switching loop is not somewhere you want
-to discover this.
+Write `while` rather than `if`. The longest instruction is 24 T-cycles and a line
+is 456, so it can only run once today, but Step 15's `HALT` in a bank-switching
+loop is not where you want to discover the difference.
 
 **Acceptance:** a `PPU` ticked 70224 dots in steps of 4 is back at `ly == 0`,
 `dots == 0`. Ticked 456, `ly == 1`. Ticked 456 × 144, `mode is Mode.VBLANK`.
@@ -683,19 +644,19 @@ will raise it twice.
 
 **STAT** on the rising edge of the OR. One helper that computes the line's
 current level from `(mode, ly, lyc, stat)`, and one comparison against
-`stat_line`. The shape is `Timer._advance_tima` with the polarity flipped, and if
+`stat_line`. The shape is `Timer._advance_tima` with the polarity flipped. If
 your version does not look like a sibling of it, one of the two is doing more
 than it needs to.
 
-Increment `frames` when VBlank is entered — the CLI needs a way to say "run until
+Increment `frames` when VBlank is entered. The CLI needs a way to say "run until
 frame 3", and the VBlank transition is the definition of a completed frame.
 
 **Acceptance:** a `PPU` ticked across the whole of one frame returns
 `Interrupt.VBLANK` exactly once. With `STAT` bit 3 set (mode 0 select) and bit 6
-clear, it returns `Interrupt.LCD_STAT` exactly 144 times — once per visible line,
-not once per tick spent in mode 0. With bits 3 and 6 both set and `LYC == 0`, line
-0 produces **one** `LCD_STAT`, not two: that assertion is STAT blocking, and it is
-the one that fails if you fire on level instead of edge.
+clear, it returns `Interrupt.LCD_STAT` exactly 144 times, once per visible line
+rather than once per tick spent in mode 0. With bits 3 and 6 both set and
+`LYC == 0`, line 0 produces **one** `LCD_STAT`. That assertion is STAT blocking,
+and it fails if you fire on level instead of edge.
 
 ---
 
@@ -705,12 +666,12 @@ Per theory section 11. When `LCDC` bit 7 goes from set to clear: `ly = 0`,
 `dots = 0`, mode to `HBLANK`, `stat_line` to `False`, and fill the framebuffer
 with shade 0.
 
-While bit 7 is clear, `tick` returns immediately — no counting, no interrupts.
+While bit 7 is clear, `tick` returns immediately: no counting, no interrupts.
 
 When it goes from clear to set, the PPU is already at the top of a frame from the
-reset above, so there is nothing extra to do. Convince yourself of that rather
-than taking it on trust; it is only true because the disable path reset the
-counters instead of freezing them.
+reset above, so there is nothing extra to do. Check that rather than taking it on
+trust: it is only true because the disable path reset the counters instead of
+freezing them.
 
 **Acceptance:** with the LCD off, ticking 70224 dots leaves `ly == 0` and
 `frames` unchanged. Writing `0x91` then `0x11` to `0xFF40` puts `LY` back to 0
@@ -727,23 +688,22 @@ def tile_row(self, index: int, row: int) -> tuple[int, ...]:
     """The eight colour indices of one row of one tile, left to right."""
 ```
 
-Two helpers behind it, both worth their own names: one that turns a tile index
-into an address per `LCDC` bit 4, and one that turns a pair of plane bytes into
-eight indices. The second is a pure function of two bytes and belongs outside the
-class — it knows nothing about a PPU.
+Two helpers behind it, each with its own name: one that turns a tile index into
+an address per `LCDC` bit 4, and one that turns a pair of plane bytes into eight
+indices. The second is a pure function of two bytes and belongs outside the
+class, since it knows nothing about a PPU.
 
 **Acceptance:** write `0x3C 0x7E` into VRAM as a tile's first row and assert the
 eight indices are `0, 2, 3, 3, 3, 3, 2, 0`. Work that out by hand from the
-diagram in section 6 before you run it; the whole value of this task is that you
-can say what the answer should be. Then flip `LCDC` bit 4 and assert both
+diagram in section 6 before you run it. Then flip `LCDC` bit 4 and assert both
 addressing modes against two indices, chosen for opposite reasons:
 
-- index `0x00` resolves to `0x8000` unsigned and `0x9000` signed. It differs, so
-  it is the one that catches a base address you took from the region's start
-  instead of from the middle.
-- index `0x80` resolves to `0x8800` **both** ways. It agrees, and working out on
-  paper why `0x8000 + 128 × 16` and `0x9000 + (−128) × 16` land on the same byte
-  is the moment the overlapping region in section 7 stops being a diagram.
+- index `0x00` resolves to `0x8000` unsigned and `0x9000` signed. The two differ,
+  so it catches a base address you took from the region's start instead of from
+  the middle.
+- index `0x80` resolves to `0x8800` **both** ways. Work out on paper why
+  `0x8000 + 128 × 16` and `0x9000 + (−128) × 16` land on the same byte; that is
+  the overlapping region from section 7.
 
 ---
 
@@ -753,16 +713,16 @@ Render line `ly` when the mode changes to `HBLANK`, per theory section 3.
 
 Per theory section 9, for each of the 160 pixels: the two `mod 256`, the map
 lookup, the tile address, the row, the bit, the index, then `BGP`. Write it as
-the arithmetic reads. The obvious optimisation — fetch a tile row once and use it
-for up to eight pixels — is a real one and it is not this step's business.
+the arithmetic reads. The obvious optimisation, fetching a tile row once and
+using it for up to eight pixels, is real and it is not this step's business.
 
 Per theory section 8, if `LCDC` bit 0 is clear the line is shade 0 and nothing is
 fetched.
 
 Per theory section 10, keep the raw colour indices for the line as well as the
-shades. 160 bytes, and Step 12 needs them for sprite priority. Storing them now
-is not speculation: it is the difference between a line renderer that Step 12
-extends and one it rewrites. Say so in a comment.
+shades. 160 bytes, and Step 12 needs them for sprite priority. That is the
+difference between a line renderer Step 12 extends and one it rewrites. Say so in
+a comment.
 
 Expose the frame as a read-only `memoryview`, per theory section 15.
 
@@ -791,10 +751,9 @@ Move it in Step 12, when there is a reader.
 **The debt from theory section 14.** `Timer.post_boot()` does not exist, and
 `__main__.py` constructs `Bus(cartridge, Timer())` in three places. Adding a
 third constructor argument would make that four things to get right per call
-site. A `Bus.post_boot(cartridge)` classmethod that assembles a machine in the
-state the boot ROM leaves it — post-boot timer, post-boot PPU — replaces all
-three call sites with one, and is the honest home for a fact that is currently
-split between `Registers.post_boot` and nowhere.
+site. A `Bus.post_boot(cartridge)` classmethod that assembles a post-boot timer
+and a post-boot PPU replaces all three call sites with one, and gives a home to a
+fact currently split between `Registers.post_boot` and nowhere.
 
 Keep the injecting constructor for tests that want a `Timer` in a chosen state.
 
@@ -806,17 +765,17 @@ on Tetris still prints what it printed before this step.
 
 ### 9. The CLI: `--frame`
 
-The step's payoff. Run until *N* frames have completed, then show one.
+Run until *N* frames have completed, then show one.
 
 ```
 uv run python -m gameboy TETRIS.gb --frame 60
 uv run python -m gameboy TETRIS.gb --frame 60 --out frame.ppm
 ```
 
-Without `--out`, print the frame as text — one character per pixel from a
-four-character ramp, so that the terminal you are already looking at is the
-display. 160 columns is wide but it fits, and being able to see the answer
-without leaving the shell is worth more than fidelity here.
+Without `--out`, print the frame as text: one character per pixel from a
+four-character ramp, so the terminal you are already looking at is the display.
+160 columns is wide but it fits, and seeing the answer without leaving the shell
+is worth more than fidelity here.
 
 With `--out`, write a binary PPM. `P5` is greyscale, one byte per pixel, and its
 whole header is three lines:
@@ -828,15 +787,15 @@ P5
 ```
 
 followed by 23040 bytes. Map shade 0–3 to `0xFF, 0xAA, 0x55, 0x00`. Every image
-viewer on the machine opens it, and it needs no dependency — which is the point,
-because a dependency here would be the first crack in design constraint 1.
+viewer on the machine opens it and it needs no dependency, which matters: a
+dependency here would be the first crack in design constraint 1.
 
 Both live in `__main__.py`, next to `dump` and `describe`, per theory section 12.
 
 Drive it with the existing `run()` generator and stop when `bus.ppu.frames`
 reaches *N*. Do not write a second loop. Step 09 said two loops that tick
-differently is a bug nobody finds until the PPU is drawing, and this is the step
-where that stops being hypothetical.
+differently is a bug nobody finds until the PPU is drawing, and the PPU is now
+drawing.
 
 Give it an instruction budget too, so a ROM that never reaches VBlank stops
 instead of hanging.
@@ -856,7 +815,7 @@ characters.
 - `LY` is read-only through `read`/`write`
 - `STAT` read assembles live bits; `STAT` write lands only on bits 6-3
 - VBlank fires once per frame
-- the STAT rising edge, and STAT blocking — the assertion in task 4
+- the STAT rising edge, and STAT blocking, per the assertion in task 4
 - `tile_row` decoding, including the bitplane order and bit 7 being leftmost
 - both tile data addressing modes, including the signed wrap at index `0x80`
 - LCD disable resets `LY` and stops the clock
@@ -870,7 +829,7 @@ characters.
 - `bus.tick` across a frame sets `IF` bit 0
 - `Bus.post_boot` gives `DIV == 0xAB` and `LCDC == 0x91`
 
-**Program level, and this is the one that matters:**
+**Program level:**
 
 A program that does what Tetris does. Something like:
 
@@ -881,8 +840,8 @@ A program that does what Tetris does. Something like:
 ;             LD A, 0x03  ; LDH (0xFF40), A   ; LCD off
 ```
 
-Step it in a bounded loop and assert that `B` incremented. That loop is the one
-the emulator has never escaped, and this is the test that says it now does.
+Step it in a bounded loop and assert that `B` incremented. That is the loop the
+emulator has never escaped.
 
 **Acceptance:** that test fails if you make `LY` writable, and fails differently
 if you drop the `ppu.tick` call from `bus.tick`. Check both. A PPU test that
@@ -898,10 +857,9 @@ passes with the PPU unplugged is testing your fixture.
 uv run python -m gameboy ~/games/TETRIS.gb --trace 200 | tail -40
 ```
 
-First: does it get past `0x0237`? Then does it write `0x03` to `0xFF40` two
-instructions later, exactly as theory section 11 predicts? Report where it goes
-after that — the answer should be a long run of VRAM writes, which is a game
-loading its font.
+Does it get past `0x0237`? Does it write `0x03` to `0xFF40` two instructions
+later, as theory section 11 predicts? Report where it goes after that. The answer
+should be a long run of VRAM writes, which is a game loading its font.
 
 Then:
 
@@ -910,10 +868,10 @@ uv run python -m gameboy ~/games/TETRIS.gb --frame 120
 ```
 
 Expect the copyright and title screen's **background**. The menu cursor is a
-sprite and will not be there; that is Step 12, not a bug. Expect, too, that the
-first thing you see is wrong in some specific way — mirrored tiles, or colours 1
-and 2 swapped. Section 6 named both in advance so that you can recognise which
-one you are looking at instead of guessing.
+sprite and will not be there; that is Step 12, not a bug. Expect the first thing
+you see to be wrong in some specific way: mirrored tiles, or colours 1 and 2
+swapped. Section 6 named both in advance so you can recognise which one you are
+looking at instead of guessing.
 
 If the frame is blank, work backwards in this order: is `LCDC` bit 7 set at the
 moment you dumped, is bit 0 set, does the tile map contain anything but zeros,
@@ -930,8 +888,8 @@ steps. It can now.
 
 `PLAN.md`: Step 11's row.
 
-A note somewhere on what the scanline renderer gives up, per theory section 1 —
-the next person to read this will want to know whether it was an oversight or a
+A note somewhere on what the scanline renderer gives up, per theory section 1.
+The next person to read this will want to know whether it was an oversight or a
 decision.
 
 ---
@@ -1006,8 +964,8 @@ decision.
    instant. Name a visual effect a game could produce that your renderer will get
    wrong, and say how you would find out whether any game you own does it.
 3. `Timer.tick` returns a `bool` and `PPU.tick` returns a tuple. Defend the
-   asymmetry, or change one of them — but say which and why before you look at
-   the code again.
+   asymmetry, or change one of them. Say which and why before you look at the
+   code again.
 4. VRAM is blocked during mode 3 on hardware and unblocked here. Describe a ROM
    that would run correctly on your emulator and fail on a real Game Boy. Is that
    the safe direction for the difference to point?
