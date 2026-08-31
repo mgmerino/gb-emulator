@@ -2,6 +2,8 @@ from dataclasses import dataclass, field
 from enum import IntEnum
 from typing import Final, Self
 
+from gameboy.memory_map import BGP, LCDC, LY, LYC, OPEN_BUS, SCX, SCY, STAT
+
 # Not modelled in this class:
 # - VRAM and OAM blocking.
 # - The variable length of mode 3.
@@ -91,6 +93,9 @@ TILE_DATA_SIGNED: Final = 0x9000
 TILE_MAP_0: Final = 0x9800
 TILE_MAP_1: Final = 0x9C00
 
+_STAT_UNUSED: Final = 0x80  # bit 7, not wired, reads 1
+_STAT_SELECTS: Final = 0x78  # bits 6-3, allowed for write select
+
 
 class Mode(IntEnum):
     HBLANK = 0
@@ -108,7 +113,7 @@ class PPU:
     # position within current scanline (0-455)
     dots: int = 0
     # current horizontal line, which might be about to be drawn, being drawn, or just
-    # been drawn
+    # been drawn. Read only.
     ly: int = 0
     # The Game Boy constantly compares the value of the LYC and LY registers. When both
     # values are identical, the LYC=LY flag in the STAT register is set, and (if
@@ -147,3 +152,47 @@ class PPU:
             bgp=0xFC,
             mode=Mode.VBLANK,
         )
+
+    def read(self, address: int) -> int:
+        if address == LCDC:
+            return self.lcdc
+        if address == STAT:
+            return self._stat_byte()
+        if address == SCY:
+            return self.scy
+        if address == SCX:
+            return self.scx
+        if address == LY:
+            return self.ly
+        if address == LYC:
+            return self.lyc
+        if address == BGP:
+            return self.bgp
+
+        return OPEN_BUS
+
+    def write(self, address: int, value: int) -> None:
+        if address == LCDC:
+            self.lcdc = value
+            return
+        if address == STAT:
+            self.stat = value & _STAT_SELECTS
+            return
+        if address == SCY:
+            self.scy = value
+            return
+        if address == SCX:
+            self.scx = value
+            return
+        if address == LYC:
+            self.lyc = value
+            return
+        if address == BGP:
+            self.bgp = value
+            return
+
+    def _stat_byte(self) -> int:
+        selects = self.stat & _STAT_SELECTS
+        lyc_match = self.ly == self.lyc
+
+        return _STAT_UNUSED | selects | (lyc_match << 2) | self.mode
