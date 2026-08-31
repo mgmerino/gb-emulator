@@ -138,11 +138,14 @@ class Timer:
 
         if falling:
             self.tima += 1
-            if self.tima > 0xFF:
+            if self._tima_overflowed():
                 self.tima = self.tma
                 return True
 
         return False
+
+    def _tima_overflowed(self) -> bool:
+        return self.tima > 0xFF
 
     def _sample_gate(self) -> bool:
         """Re-evaluate the gate after a write changed one of its inputs."""
