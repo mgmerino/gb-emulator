@@ -6,7 +6,7 @@ how far a ROM gets.
 
 from typing import Protocol, Self, final
 
-from gameboy import bits, memory_map
+from gameboy import bits, interrupts, memory_map
 from gameboy.interrupts import Interrupt, request
 from gameboy.ppu import PPU
 from gameboy.serial import Serial
@@ -127,7 +127,9 @@ class Bus:
     def tick(self, cycles: int) -> None:
         """Fan the elapsed time out to the devices hanging off the bus."""
         if self.timer.tick(cycles):
-            request(self, Interrupt.TIMER)
+            interrupts.request(self, Interrupt.TIMER)
+        for interrupt in self.ppu.tick(cycles):
+            interrupts.request(self, interrupt)
 
     def read16(self, address: int) -> int:
         return bits.join_bytes(self.read(address + 1), self.read(address))

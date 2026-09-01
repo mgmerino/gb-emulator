@@ -4,7 +4,17 @@ from gameboy.bits import get_bit
 from gameboy.cartridge import Cartridge
 from gameboy.interrupts import Interrupt
 from gameboy.memory import Bus
-from gameboy.memory_map import BGP, DIVIDER, LCDC, LY, LYC, SCX, SCY, STAT
+from gameboy.memory_map import (
+    BGP,
+    DIVIDER,
+    INTERRUPT_FLAG,
+    LCDC,
+    LY,
+    LYC,
+    SCX,
+    SCY,
+    STAT,
+)
 from gameboy.ppu import (
     PPU,
     SCREEN_HEIGHT,
@@ -307,6 +317,23 @@ def test_turning_the_lcd_back_on_restarts_at_the_top_of_a_frame(running: PPU) ->
 # --- task 6: the bus ---------------------------------------------------------
 
 
+def test_the_bus_hands_elapsed_time_to_the_ppu(cartridge: Cartridge) -> None:
+    bus = Bus.post_boot(cartridge)
+
+    bus.tick(456)
+
+    assert bus.ppu.ly == 1
+
+
+def test_a_frame_through_the_bus_requests_vblank(cartridge: Cartridge) -> None:
+    bus = Bus.post_boot(cartridge)
+
+    for _ in range(70224 // 4):
+        bus.tick(4)
+
+    assert get_bit(bus.read(INTERRUPT_FLAG), Interrupt.VBLANK)
+
+
 def test_post_boot_assembles_a_machine_the_boot_rom_would_have_left(
     cartridge: Cartridge,
 ) -> None:
@@ -314,3 +341,13 @@ def test_post_boot_assembles_a_machine_the_boot_rom_would_have_left(
 
     assert bus.read(DIVIDER) == 0xAB
     assert bus.read(LCDC) == 0x91
+
+
+def test_a_plain_bus_leaves_the_lcd_off(bus: Bus) -> None:
+    # Everything written before this task assumes a bus whose PPU stays idle.
+    for _ in range(70224 // 4):
+        bus.tick(4)
+
+    assert bus.ppu.ly == 0
+    assert bus.ppu.frames == 0
+    assert not get_bit(bus.read(INTERRUPT_FLAG), Interrupt.VBLANK)
