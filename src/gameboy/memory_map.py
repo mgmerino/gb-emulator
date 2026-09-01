@@ -55,7 +55,7 @@ TIMER_MODULO: Final = 0xFF06
 TIMER_CONTROL: Final = 0xFF07
 TIMER_REGISTERS: Final = range(DIVIDER, TIMER_CONTROL + 1)
 
-# VRAM Registers
+# PPU Registers
 LCDC: Final = 0xFF40
 STAT: Final = 0xFF41
 SCY: Final = 0xFF42
@@ -63,3 +63,7 @@ SCX: Final = 0xFF43
 LY: Final = 0xFF44
 LYC: Final = 0xFF45
 BGP: Final = 0xFF47
+
+# We need two ranges because 0xFF46 is on the middle and belongs to DMA
+PPU_REGISTERS_1: Final = range(LCDC, LYC + 1)
+PPU_REGISTERS_2: Final = BGP
