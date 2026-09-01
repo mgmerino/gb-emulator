@@ -2,6 +2,7 @@ from dataclasses import dataclass, field
 from enum import IntEnum
 from typing import Final, Self
 
+from gameboy.interrupts import Interrupt
 from gameboy.memory_map import BGP, LCDC, LY, LYC, OPEN_BUS, SCX, SCY, STAT
 
 # Not modelled in this class:
@@ -11,6 +12,8 @@ from gameboy.memory_map import BGP, LCDC, LY, LYC, OPEN_BUS, SCX, SCY, STAT
 # - The `LY == 153` quirk.
 # - Sprites and the window.
 #
+# The PPU is clocked by the same 4.194304 MHz crystal as everything else. Its unit of
+# time is a **dot**, and one dot is one T-cycle.
 # Geometry W×H: 160×144
 # 1 scanline  = 456 dots
 # 1 frame     = 154 scanlines  =  70224 dots
@@ -190,6 +193,26 @@ class PPU:
         if address == BGP:
             self.bgp = value
             return
+
+    def tick(self, cycles: int) -> tuple[Interrupt, ...]:
+        """Advance the PPU by `cycles` dots. Returns the interrupts to request."""
+        self.dots += cycles
+        while self.dots >= SCANLINE_DOTS:
+            self.dots -= SCANLINE_DOTS
+            self.ly = (self.ly + 1) % LINES_PER_FRAME
+
+        # Deriving the mode from the position is simpler than tracking a state machine
+        # with transitions, since mode is a pure function of ly and dots
+        if self.ly >= SCREEN_HEIGHT:
+            self.mode = Mode.VBLANK
+        elif self.dots < OAM_SCAN_DOTS:
+            self.mode = Mode.OAM_SCAN
+        elif self.dots < OAM_SCAN_DOTS + DRAWING_DOTS:
+            self.mode = Mode.DRAWING
+        else:
+            self.mode = Mode.HBLANK
+
+        return ()
 
     def _stat_byte(self) -> int:
         selects = self.stat & _STAT_SELECTS

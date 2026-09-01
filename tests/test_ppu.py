@@ -112,3 +112,74 @@ def test_post_boot_stat_reads_the_documented_byte() -> None:
 
 def test_reading_an_address_the_ppu_does_not_own_is_open_bus(ppu: PPU) -> None:
     assert ppu.read(0xFF46) == 0xFF  # DMA, Step 12
+
+
+# --- task 3: the dot counter and the mode machine ---------------------------
+
+
+@pytest.mark.parametrize(
+    ("dots", "expected"),
+    [
+        (0, Mode.OAM_SCAN),
+        (79, Mode.OAM_SCAN),  # last dot of mode 2
+        (80, Mode.DRAWING),  # first dot of mode 3
+        (251, Mode.DRAWING),  # last dot of mode 3, 80 + 172 - 1
+        (252, Mode.HBLANK),  # first dot of mode 0
+        (455, Mode.HBLANK),  # last dot of the line
+    ],
+)
+def test_the_mode_follows_the_position_within_a_line(
+    ppu: PPU, dots: int, expected: Mode
+) -> None:
+    ppu.tick(dots)
+
+    assert ppu.mode is expected
+
+
+def test_a_scanline_is_456_dots(ppu: PPU) -> None:
+    ppu.tick(456)
+
+    assert ppu.ly == 1
+    assert ppu.dots == 0
+
+
+def test_the_dot_counter_carries_into_the_next_line(ppu: PPU) -> None:
+    ppu.tick(400)
+    ppu.tick(100)
+
+    assert ppu.ly == 1
+    assert ppu.dots == 44
+
+
+def test_vblank_begins_on_line_144(ppu: PPU) -> None:
+    ppu.tick(456 * 144)
+
+    assert ppu.ly == 144
+    assert ppu.mode is Mode.VBLANK
+
+
+def test_a_whole_frame_returns_to_the_top(ppu: PPU) -> None:
+    for _ in range(70224 // 4):
+        ppu.tick(4)
+
+    assert ppu.ly == 0
+    assert ppu.dots == 0
+    assert ppu.mode is Mode.OAM_SCAN
+
+
+def test_ly_wraps_after_the_last_line(ppu: PPU) -> None:
+    ppu.tick(456 * 153)
+
+    assert ppu.ly == 153
+
+    ppu.tick(456)
+
+    assert ppu.ly == 0
+
+
+def test_a_tick_longer_than_a_line_advances_several_lines(ppu: PPU) -> None:
+    ppu.ly = 0
+    ppu.tick(456 * 3 + 3)
+
+    assert ppu.ly == 3
+    assert ppu.dots == 3
