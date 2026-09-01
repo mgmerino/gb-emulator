@@ -24,6 +24,8 @@ tour:
 | 08 | [Interrupts, `HALT` and the master flag](docs/STEP_08.md) | done |
 | 09 | [Timer, divider and the falling-edge detector](docs/STEP_09.md) | done |
 | 10 | Blargg `cpu_instrs` — arrived with Step 09's serial port | done |
+| 11A | [The PPU as a clock: modes, LCD registers, interrupts](docs/STEP_11A.md) | done |
+| 11B | [The PPU as a renderer: tiles, maps, scrolling](docs/STEP_11B.md) | in progress |
 
 ## Requirements
 
@@ -142,21 +144,47 @@ Two things do not work yet:
 - **`--run N` has no early exit**, so a verdict that arrives at 2M instructions
   still costs the whole budget.
 
+## The PPU
+
+The PPU counts dots, walks the four modes, reports its position through the LCD
+registers, and raises `VBlank` and `LCD_STAT`. It does not draw yet: Step 11B
+turns what a ROM writes into VRAM into 160×144 bytes.
+
+The renderer this is being built towards is a **scanline renderer**, not a dot
+renderer. The hardware produces one pixel per dot through a fetcher and an
+8-pixel FIFO; this project instead computes a whole line at once, at the end of
+mode 3, from whatever the registers say at that instant. That is a deliberate
+trade, not an omission:
+
+| | Dot renderer | Scanline renderer |
+| --- | --- | --- |
+| Register changes *between* lines | correct | correct |
+| Register changes *within* a line | correct | wrong — the line uses the final value |
+| Cost per frame | 70224 steps | 144 renders |
+
+Almost no DMG game changes `SCX` mid-line. The ones that do are warping a status
+bar or shearing an image on purpose. Step 13 revisits the trade with a running
+game to measure against.
+
+Also not modelled, and listed at the top of `ppu.py` with the reason for each:
+VRAM and OAM blocking during mode 3, the variable length of mode 3, the pixel
+FIFO, and the `LY == 153` quirk.
+
 ## What is missing
 
-The timer raises interrupts and `HALT` wakes on its own, so the machine now keeps
-time. What it cannot do is draw: a real game configures itself, then waits for
-the PPU before touching VRAM, and that wait never ends.
+The emulator keeps time and now keeps a display clock, so a real game gets
+through its setup:
 
 ```
 0233: F0 44    LDH A, (FF44)    ; LY, the line the PPU is drawing
-0235: FE 94    CP  A, 0x94      ; 148, the first line of VBlank
+0235: FE 94    CP  A, 0x94      ; 148, the fifth line of VBlank
 0237: 20 FA    JR  NZ, -6
-0239: 3E 03    LD  A, 0x03      ; never reached — what follows writes LCDC
+0239: 3E 03    LD  A, 0x03      ; reached — this writes LCDC and stops the LCD
 ```
 
-Nothing writes `LY` yet, so `CP` never matches. An endless loop here is the
-correct outcome, and it ends in Step 11.
+Tetris now clears its memory, sets up sound and palettes, and loads its font:
+3625 of the 6144 tile-data bytes and all 1024 cells of tile map 0. What it
+cannot do is show any of it. That is Step 11B.
 
 ## Development
 

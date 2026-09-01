@@ -187,7 +187,7 @@ looked.** Everything else is derived.
 cycle. So the obvious implementation is wrong:
 
 ```python
-self.counter = (self.counter + cycles) & 0xFFFF   # then check the edge
+self.counter = (self.counter + cycles) & 0xFFFF  # then check the edge
 ```
 
 Add 16 to a counter whose watched bit is bit 3 and the bit went 0 → 1 → 0 → 1 in
@@ -426,11 +426,11 @@ A new leaf module. The state is smaller than the register list suggests:
 ```python
 @dataclass(slots=True)
 class Timer:
-    counter: int = 0      # the internal 16-bit counter. DIV is its top byte
+    counter: int = 0  # the internal 16-bit counter. DIV is its top byte
     tima: int = 0
     tma: int = 0
     tac: int = 0
-    last_and: bool = False   # what the edge detector saw last
+    last_and: bool = False  # what the edge detector saw last
 ```
 
 `DIV` is a property over `counter`. `TAC` reads with its unused bits set.

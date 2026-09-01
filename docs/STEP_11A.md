@@ -336,17 +336,17 @@ class PPU:
     framebuffer: bytearray = field(
         default_factory=lambda: bytearray(SCREEN_WIDTH * SCREEN_HEIGHT)
     )
-    dots: int = 0          # position within the current scanline, 0–455
+    dots: int = 0  # position within the current scanline, 0–455
     ly: int = 0
     lyc: int = 0
     lcdc: int = 0
-    stat: int = 0          # only bits 6-3 live here; 2-0 are computed
+    stat: int = 0  # only bits 6-3 live here; 2-0 are computed
     scy: int = 0
     scx: int = 0
     bgp: int = 0
     mode: Mode = Mode.OAM_SCAN
-    last_stat_line: bool = False   # the OR gate's previous sample
-    frames: int = 0           # completed frames, for the CLI to count
+    last_stat_line: bool = False  # the OR gate's previous sample
+    frames: int = 0  # completed frames, for the CLI to count
 ```
 
 `field(default_factory=...)` rather than a plain default: a dataclass evaluates a
@@ -546,9 +546,16 @@ this step.
 Step it in a bounded loop and assert that `B` incremented. That is the loop the
 emulator has never escaped.
 
-**Acceptance:** that test fails if you make `LY` writable, and fails differently
-if you drop the `ppu.tick` call from `bus.tick`. Check both. A PPU test that
-passes with the PPU unplugged is testing your fixture.
+That program only *reads* `LY`, so it says nothing about whether the register is
+writable. Write a second one with an `LDH (0xFF44), A` inside the loop: with `LY`
+read-only the write is dropped and the loop still ends, and if the bus let it
+through, `LY` would be pushed back to 0 on every pass and 148 would never arrive.
+One test, one reason to fail.
+
+**Acceptance:** the first test fails if you drop the `ppu.tick` call from
+`bus.tick`, and the second fails if you make `LY` writable. Break each one and
+watch the right test go red — a PPU test that passes with the PPU unplugged is
+testing your fixture.
 
 ---
 
