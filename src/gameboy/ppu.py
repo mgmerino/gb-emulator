@@ -82,6 +82,8 @@ from gameboy.memory_map import BGP, LCDC, LY, LYC, OPEN_BUS, SCX, SCY, STAT, VRA
 #           │         │
 #    0x97F0 └─────────┘  index 127  (0x7F)      address = 0x9000 + signed × 16
 
+# Geometry
+BACKGROUND_SIZE: Final = 256
 SCREEN_WIDTH: Final = 160
 SCREEN_HEIGHT: Final = 144
 LINES_PER_FRAME: Final = 154
@@ -96,9 +98,13 @@ TILE_DATA_UNSIGNED: Final = 0x8000
 TILE_DATA_SIGNED: Final = 0x9000
 TILE_MAP_0: Final = 0x9800
 TILE_MAP_1: Final = 0x9C00
-
+TILE_MAP_WIDTH: Final = 32  # cells per row
+# Bit positions
 _LCD_ENABLE: Final = 7  # LCDC bit 7, it stops the PPU
 _TILE_DATA_SELECT: Final = 4  # LCDC bit 4. Set means the 0x8000 method
+_BG_ENABLE: Final = 0  # LCDC bit 0. Clear means the background is not drawn at all.
+_BG_TILE_MAP: Final = 3  # LCDC bit 3. Set means map 1 (0x9C00), clear means map 0.
+
 _STAT_UNUSED: Final = 0x80  # bit 7, not wired, reads 1
 _STAT_SELECTS: Final = 0x78  # bits 6-3, allowed for write select
 
@@ -150,6 +156,10 @@ class PPU:
     mode: Mode = Mode.OAM_SCAN
     last_stat_line: bool = False  # the OR gate's previous sample
     frames: int = 0  # completed frames, for the CLI to count
+    # The raw colour indices of the line just rendered, 160 bytes.
+    # Step 12 needs them: sprite priority asks whether the background's colour
+    # *index* was 0, and BGP can map index 0 to black, so a shade cannot answer.
+    line_indices: bytearray = field(default_factory=lambda: bytearray(SCREEN_WIDTH))
 
     @classmethod
     def post_boot(cls) -> Self:
@@ -230,6 +240,16 @@ class PPU:
             interrupts = (Interrupt.VBLANK,)
             self.frames += 1
 
+        # The third consumer of `previous_mode`: the line is drawn once, on the
+        # edge into HBlank. `ly < SCREEN_HEIGHT` is true whenever mode 0 is, but
+        # saying it out loud is what keeps the framebuffer index in range.
+        if (
+            self.mode is Mode.HBLANK
+            and previous_mode is not Mode.HBLANK
+            and self.ly < SCREEN_HEIGHT
+        ):
+            self._render_scanline()
+
         level = self._stat_line_level()
         rising = level and not self.last_stat_line
         if rising:
@@ -250,6 +270,36 @@ class PPU:
             return TILE_DATA_UNSIGNED + index * TILE_SIZE
 
         return TILE_DATA_SIGNED + to_signed8(index) * TILE_SIZE
+
+    def _render_scanline(self) -> None:
+        """Draw line `ly`"""
+        start = self.ly * SCREEN_WIDTH
+
+        if not get_bit(self.lcdc, _BG_ENABLE):
+            # No background: shade 0 and index 0
+            self.framebuffer[start : start + SCREEN_WIDTH] = bytes(SCREEN_WIDTH)
+            self.line_indices[:] = bytes(SCREEN_WIDTH)
+            return
+
+        background_y = (self.ly + self.scy) % BACKGROUND_SIZE
+        map_row = background_y // 8  # which row of CELLS
+        row_in_tile = background_y % 8  # which row of PIXELS inside a cell
+
+        # find which one is using and calculate the address offset
+        map_base = TILE_MAP_1 if get_bit(self.lcdc, _BG_TILE_MAP) else TILE_MAP_0
+        map_offset = map_base - VRAM.start + map_row * TILE_MAP_WIDTH
+
+        for x in range(SCREEN_WIDTH):
+            background_x = (x + self.scx) % BACKGROUND_SIZE
+            tile_index = self.vram[map_offset + background_x // 8]
+            index = self.tile_row(tile_index, row_in_tile)[background_x % 8]
+
+            self.line_indices[x] = index
+            self.framebuffer[start + x] = (self.bgp >> (index * 2)) & 0b11
+
+    @property
+    def frame(self) -> memoryview:
+        return memoryview(self.framebuffer).toreadonly()
 
     def _stat_byte(self) -> int:
         selects = self.stat & _STAT_SELECTS
