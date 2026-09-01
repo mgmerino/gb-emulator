@@ -39,7 +39,12 @@ class Bus:
 
     @classmethod
     def post_boot(cls, cartridge: MemoryDevice) -> Self:
-        """Inits a Timer with the counter at 0xAB00 and a PPU with its LCD off"""
+        """Safe init state for bus.
+
+        DIV reads 0xAB and the LCD is on, i.e.: the boot ROM turned it on to draw the
+        Nintendo logo. The inject in the constructor stays for tests that need a device
+        in an arbitrary state; plain `PPU()` keeps the LCD off and the clock stopped.
+        """
         return cls(cartridge, Timer.post_boot(), PPU.post_boot())
 
     def read(self, address: int) -> int:
