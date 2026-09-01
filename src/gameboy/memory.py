@@ -4,7 +4,7 @@ crashes the emulator instead of degrading it, and we lose the ability to see
 how far a ROM gets.
 """
 
-from typing import Protocol, final
+from typing import Protocol, Self, final
 
 from gameboy import bits, memory_map
 from gameboy.interrupts import Interrupt, request
@@ -36,6 +36,11 @@ class Bus:
         # Constructed rather than injected: unlike the timer, the serial port
         # has no post-boot state a caller could want to choose.
         self.serial = Serial()
+
+    @classmethod
+    def post_boot(cls, cartridge: MemoryDevice) -> Self:
+        """Inits a Timer with the counter at 0xAB00 and a PPU with its LCD off"""
+        return cls(cartridge, Timer.post_boot(), PPU.post_boot())
 
     def read(self, address: int) -> int:
         masked_address = bits.u16(address)

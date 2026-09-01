@@ -1,8 +1,10 @@
 import pytest
 
 from gameboy.bits import get_bit
+from gameboy.cartridge import Cartridge
 from gameboy.interrupts import Interrupt
-from gameboy.memory_map import BGP, LCDC, LY, LYC, SCX, SCY, STAT
+from gameboy.memory import Bus
+from gameboy.memory_map import BGP, DIVIDER, LCDC, LY, LYC, SCX, SCY, STAT
 from gameboy.ppu import (
     PPU,
     SCREEN_HEIGHT,
@@ -300,3 +302,15 @@ def test_turning_the_lcd_back_on_restarts_at_the_top_of_a_frame(running: PPU) ->
     run_dots(running, 456 * 3)
 
     assert running.ly == 3
+
+
+# --- task 6: the bus ---------------------------------------------------------
+
+
+def test_post_boot_assembles_a_machine_the_boot_rom_would_have_left(
+    cartridge: Cartridge,
+) -> None:
+    bus = Bus.post_boot(cartridge)
+
+    assert bus.read(DIVIDER) == 0xAB
+    assert bus.read(LCDC) == 0x91
