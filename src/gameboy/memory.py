@@ -4,10 +4,11 @@ crashes the emulator instead of degrading it, and we lose the ability to see
 how far a ROM gets.
 """
 
-from typing import Protocol, final
+from typing import Protocol, Self, final
 
-from gameboy import bits, memory_map
+from gameboy import bits, interrupts, memory_map
 from gameboy.interrupts import Interrupt, request
+from gameboy.ppu import PPU
 from gameboy.serial import Serial
 from gameboy.timer import Timer
 
@@ -21,7 +22,7 @@ class MemoryDevice(Protocol):
 
 @final
 class Bus:
-    def __init__(self, cartridge: MemoryDevice, timer: Timer) -> None:
+    def __init__(self, cartridge: MemoryDevice, timer: Timer, ppu: PPU) -> None:
         self.cartridge = cartridge
         self.wram = bytearray(0x2000)
         self.hram = bytearray(0x7F)
@@ -31,9 +32,20 @@ class Bus:
         self.ie = 0
         self.i_flag = 0
         self.timer = timer
+        self.ppu = ppu
         # Constructed rather than injected: unlike the timer, the serial port
         # has no post-boot state a caller could want to choose.
         self.serial = Serial()
+
+    @classmethod
+    def post_boot(cls, cartridge: MemoryDevice) -> Self:
+        """Safe init state for bus.
+
+        DIV reads 0xAB and the LCD is on, i.e.: the boot ROM turned it on to draw the
+        Nintendo logo. The inject in the constructor stays for tests that need a device
+        in an arbitrary state; plain `PPU()` keeps the LCD off and the clock stopped.
+        """
+        return cls(cartridge, Timer.post_boot(), PPU.post_boot())
 
     def read(self, address: int) -> int:
         masked_address = bits.u16(address)
@@ -49,6 +61,11 @@ class Bus:
                 return self.timer.read(masked_address)
             case _ if masked_address in memory_map.SERIAL_REGISTERS:
                 return self.serial.read(masked_address)
+            case _ if (
+                masked_address in memory_map.PPU_REGISTERS_1
+                or masked_address == memory_map.PPU_REGISTERS_2
+            ):
+                return self.ppu.read(masked_address)
             case memory_map.INTERRUPT_FLAG:
                 # Only five sources exist, so bits 7-5 are not wired to anything
                 # and an unwired line on this bus reads high.
@@ -86,6 +103,11 @@ class Bus:
                     request(self, Interrupt.TIMER)
             case _ if masked_address in memory_map.SERIAL_REGISTERS:
                 self.serial.write(masked_address, masked_value)
+            case _ if (
+                masked_address in memory_map.PPU_REGISTERS_1
+                or masked_address == memory_map.PPU_REGISTERS_2
+            ):
+                self.ppu.write(masked_address, masked_value)
             case memory_map.INTERRUPT_FLAG:
                 self.i_flag = masked_value
             case _ if masked_address in memory_map.WRAM:
@@ -110,7 +132,9 @@ class Bus:
     def tick(self, cycles: int) -> None:
         """Fan the elapsed time out to the devices hanging off the bus."""
         if self.timer.tick(cycles):
-            request(self, Interrupt.TIMER)
+            interrupts.request(self, Interrupt.TIMER)
+        for interrupt in self.ppu.tick(cycles):
+            interrupts.request(self, interrupt)
 
     def read16(self, address: int) -> int:
         return bits.join_bytes(self.read(address + 1), self.read(address))

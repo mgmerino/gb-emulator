@@ -1,5 +1,5 @@
 from dataclasses import dataclass
-from typing import Final
+from typing import Final, Self
 
 from gameboy.bits import get_bit, high_byte, u16
 from gameboy.memory_map import DIVIDER, TIMER_CONTROL, TIMER_COUNTER, TIMER_MODULO
@@ -101,6 +101,13 @@ class Timer:
                 overflowed = True
 
         return overflowed
+
+    @classmethod
+    def post_boot(cls) -> Self:
+        timer = cls()
+        timer.counter = 0xAB00
+
+        return timer
 
     def read(self, address: int) -> int:
         if address == DIVIDER:

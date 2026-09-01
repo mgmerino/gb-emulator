@@ -2,6 +2,8 @@ from dataclasses import dataclass, field
 from enum import IntEnum
 from typing import Final, Self
 
+from gameboy.bits import get_bit
+from gameboy.interrupts import Interrupt
 from gameboy.memory_map import BGP, LCDC, LY, LYC, OPEN_BUS, SCX, SCY, STAT
 
 # Not modelled in this class:
@@ -11,6 +13,8 @@ from gameboy.memory_map import BGP, LCDC, LY, LYC, OPEN_BUS, SCX, SCY, STAT
 # - The `LY == 153` quirk.
 # - Sprites and the window.
 #
+# The PPU is clocked by the same 4.194304 MHz crystal as everything else. Its unit of
+# time is a **dot**, and one dot is one T-cycle.
 # Geometry W×H: 160×144
 # 1 scanline  = 456 dots
 # 1 frame     = 154 scanlines  =  70224 dots
@@ -93,6 +97,7 @@ TILE_DATA_SIGNED: Final = 0x9000
 TILE_MAP_0: Final = 0x9800
 TILE_MAP_1: Final = 0x9C00
 
+_LCD_ENABLE: Final = 7  # LCDC bit 7, it stops the PPU
 _STAT_UNUSED: Final = 0x80  # bit 7, not wired, reads 1
 _STAT_SELECTS: Final = 0x78  # bits 6-3, allowed for write select
 
@@ -142,7 +147,7 @@ class PPU:
     # BG and Window tiles.
     bgp: int = 0
     mode: Mode = Mode.OAM_SCAN
-    stat_line: bool = False  # what the OR gate read on the prev sample
+    last_stat_line: bool = False  # the OR gate's previous sample
     frames: int = 0  # completed frames, for the CLI to count
 
     @classmethod
@@ -173,7 +178,11 @@ class PPU:
 
     def write(self, address: int, value: int) -> None:
         if address == LCDC:
+            was_on = get_bit(self.lcdc, _LCD_ENABLE)
             self.lcdc = value
+            is_on = get_bit(self.lcdc, _LCD_ENABLE)
+            if was_on and not is_on:
+                self._switch_off()
             return
         if address == STAT:
             self.stat = value & _STAT_SELECTS
@@ -191,8 +200,71 @@ class PPU:
             self.bgp = value
             return
 
+    def tick(self, cycles: int) -> tuple[Interrupt, ...]:
+        """Advance the PPU by `cycles` dots. Returns the interrupts to request."""
+        if not get_bit(self.lcdc, _LCD_ENABLE):
+            return ()
+
+        self.dots += cycles
+        while self.dots >= SCANLINE_DOTS:
+            self.dots -= SCANLINE_DOTS
+            self.ly = (self.ly + 1) % LINES_PER_FRAME
+
+        # Deriving the mode from the position is simpler than tracking a state machine
+        # with transitions, since mode is a pure function of ly and dots
+
+        interrupts: tuple[Interrupt, ...] = ()
+        previous_mode = self.mode
+
+        if self.ly >= SCREEN_HEIGHT:
+            self.mode = Mode.VBLANK
+        elif self.dots < OAM_SCAN_DOTS:
+            self.mode = Mode.OAM_SCAN
+        elif self.dots < OAM_SCAN_DOTS + DRAWING_DOTS:
+            self.mode = Mode.DRAWING
+        else:
+            self.mode = Mode.HBLANK
+
+        if self.mode is Mode.VBLANK and previous_mode is not Mode.VBLANK:
+            interrupts = (Interrupt.VBLANK,)
+            self.frames += 1
+
+        level = self._stat_line_level()
+        rising = level and not self.last_stat_line
+        if rising:
+            interrupts = interrupts + (Interrupt.LCD_STAT,)
+
+        self.last_stat_line = level
+
+        return interrupts
+
     def _stat_byte(self) -> int:
         selects = self.stat & _STAT_SELECTS
         lyc_match = self.ly == self.lyc
 
         return _STAT_UNUSED | selects | (lyc_match << 2) | self.mode
+
+    def _stat_line_level(self) -> bool:
+        # LY == LYC ──── AND ──── STAT bit 6 ──┐
+        #                                      │
+        # mode == 0 ──── AND ──── STAT bit 3 ──┤
+        #                                      ├─── OR ───► did it rise 0 → 1 ?
+        # mode == 1 ──── AND ──── STAT bit 4 ──┤                    │
+        #                                      │                    ▼
+        # mode == 2 ──── AND ──── STAT bit 5 ──┘             IF bit 1 · 0xFF0F
+        lyc = get_bit(self.stat, 6) and self.ly == self.lyc
+        mode0 = get_bit(self.stat, 3) and self.mode is Mode.HBLANK
+        mode1 = get_bit(self.stat, 4) and self.mode is Mode.VBLANK
+        mode2 = get_bit(self.stat, 5) and self.mode is Mode.OAM_SCAN
+
+        return bool(lyc or mode0 or mode1 or mode2)
+
+    def _switch_off(self) -> None:
+        """Stop the PPU, per `LCDC` bit 7. The counters reset, so the PPU is already at
+        the top of a frame.
+        """
+        self.ly = 0
+        self.dots = 0
+        self.mode = Mode.HBLANK
+        self.last_stat_line = False
+        self.framebuffer[:] = bytes(len(self.framebuffer))

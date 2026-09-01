@@ -4,8 +4,15 @@ from conftest import FakeCartridge
 from gameboy import memory_map
 from gameboy.memory import Bus
 from gameboy.memory_map import (
+    BGP,
     DIVIDER,
     INTERRUPT_FLAG,
+    LCDC,
+    LY,
+    LYC,
+    SCX,
+    SCY,
+    STAT,
     TIMER_CONTROL,
     TIMER_COUNTER,
     TIMER_MODULO,
@@ -351,3 +358,50 @@ def test_the_interrupt_flag_does_not_fall_through_to_the_io_array(bus: Bus) -> N
 
     assert bus.io[INTERRUPT_FLAG - 0xFF00] == 0x00
     assert bus.i_flag == 0x04
+
+
+# ---------------------------------------------------------------------------
+# The LCD registers
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("address", [LCDC, STAT, SCY, SCX, LYC, BGP])
+def test_the_lcd_registers_route_to_the_ppu(bus: Bus, address: int) -> None:
+    bus.write(address, 0x5A)
+
+    assert bus.read(address) == bus.ppu.read(address)
+
+
+def test_ly_is_read_only_through_the_bus(bus: Bus) -> None:
+    bus.ppu.ly = 42
+
+    bus.write(LY, 0xFF)
+
+    assert bus.read(LY) == 42
+
+
+def test_stat_reads_live_bits_through_the_bus(bus: Bus) -> None:
+    bus.write(STAT, 0xFF)
+
+    assert bus.read(STAT) == bus.ppu.read(STAT)
+    assert bus.read(STAT) & 0b0000_0111 != 0b0000_0111
+
+
+def test_the_dma_register_still_falls_through_to_the_io_array(bus: Bus) -> None:
+    # 0xFF46 sits inside 0xFF40-0xFF47 but belongs to Step 12. Letting it fall
+    # through to `io` gives correct read-back for free; claiming it now means
+    # writing storage for a register nothing reads.
+    bus.write(0xFF46, 0x5A)
+
+    assert bus.read(0xFF46) == 0x5A
+
+
+@pytest.mark.parametrize("address", [LCDC, STAT, SCY, SCX, LYC, BGP])
+def test_the_lcd_registers_do_not_fall_through_to_the_io_array(
+    bus: Bus, address: int
+) -> None:
+    # Same trap as the timer page: these sit inside the IO range, so the PPU
+    # branch only ever runs if it comes first in the match.
+    bus.write(address, 0x11)
+
+    assert bus.io[address - 0xFF00] == 0x00

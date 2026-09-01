@@ -307,7 +307,7 @@ collects this into one place.
   allocates nothing. In Ruby you would return an array and pay for it.
 - **Deriving instead of storing.** `mode` is a pure function of `(ly, dots)` and
   `STAT` bits 2-0 are a pure function of `(mode, ly, lyc)`. Two fields exist
-  anyway — `mode` and `stat_line` — and section 4 of the questions asks you to
+  anyway — `mode` and `last_stat_line` — and section 4 of the questions asks you to
   say why.
 
 ---
@@ -336,17 +336,17 @@ class PPU:
     framebuffer: bytearray = field(
         default_factory=lambda: bytearray(SCREEN_WIDTH * SCREEN_HEIGHT)
     )
-    dots: int = 0          # position within the current scanline, 0–455
+    dots: int = 0  # position within the current scanline, 0–455
     ly: int = 0
     lyc: int = 0
     lcdc: int = 0
-    stat: int = 0          # only bits 6-3 live here; 2-0 are computed
+    stat: int = 0  # only bits 6-3 live here; 2-0 are computed
     scy: int = 0
     scx: int = 0
     bgp: int = 0
     mode: Mode = Mode.OAM_SCAN
-    stat_line: bool = False   # what the OR gate read on the previous sample
-    frames: int = 0           # completed frames, for the CLI to count
+    last_stat_line: bool = False  # the OR gate's previous sample
+    frames: int = 0  # completed frames, for the CLI to count
 ```
 
 `field(default_factory=...)` rather than a plain default: a dataclass evaluates a
@@ -455,7 +455,8 @@ raises it twice.
 
 **STAT** on the rising edge of the OR. One helper that computes the line's
 current level from `(mode, ly, lyc, stat)`, and one comparison against
-`stat_line`. The shape is `Timer._advance_tima` with the polarity flipped. If
+`last_stat_line`, named after its sibling `Timer.last_and`. The shape is
+`Timer._advance_tima` with the polarity flipped. If
 your version does not look like a sibling of it, one of the two is doing more
 than it needs to.
 
@@ -474,7 +475,8 @@ fire on level instead of edge.
 ### 5. Turning the LCD off
 
 Per section 6. When `LCDC` bit 7 goes from set to clear: `ly = 0`, `dots = 0`,
-mode to `HBLANK`, `stat_line` to `False`, and fill the framebuffer with shade 0.
+mode to `HBLANK`, `last_stat_line` to `False`, and fill the framebuffer with
+shade 0.
 
 While bit 7 is clear, `tick` returns immediately: no counting, no interrupts.
 
@@ -544,9 +546,16 @@ this step.
 Step it in a bounded loop and assert that `B` incremented. That is the loop the
 emulator has never escaped.
 
-**Acceptance:** that test fails if you make `LY` writable, and fails differently
-if you drop the `ppu.tick` call from `bus.tick`. Check both. A PPU test that
-passes with the PPU unplugged is testing your fixture.
+That program only *reads* `LY`, so it says nothing about whether the register is
+writable. Write a second one with an `LDH (0xFF44), A` inside the loop: with `LY`
+read-only the write is dropped and the loop still ends, and if the bus let it
+through, `LY` would be pushed back to 0 on every pass and 148 would never arrive.
+One test, one reason to fail.
+
+**Acceptance:** the first test fails if you drop the `ppu.tick` call from
+`bus.tick`, and the second fails if you make `LY` writable. Break each one and
+watch the right test go red — a PPU test that passes with the PPU unplugged is
+testing your fixture.
 
 ---
 

@@ -12,6 +12,7 @@ from gameboy.memory_map import (
     TIMER_COUNTER,
     TIMER_MODULO,
 )
+from gameboy.ppu import PPU
 from gameboy.timer import Timer
 
 
@@ -386,7 +387,7 @@ def test_a_halted_cpu_is_woken_by_the_timer_and_runs_its_handler() -> None:
     image[0x0050 : 0x0050 + len(handler)] = bytes(handler)
     image[0x0100 : 0x0100 + len(program)] = bytes(program)
 
-    bus = Bus(Cartridge.from_bytes(bytes(image)), Timer())
+    bus = Bus(Cartridge.from_bytes(bytes(image)), Timer(), PPU())
     cpu = CPU(bus, Registers.post_boot())
 
     for _ in range(100):  # bounded: a halted CPU with nothing pending never wakes
