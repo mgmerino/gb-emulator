@@ -2,6 +2,7 @@ import pytest
 
 from gameboy.bits import get_bit
 from gameboy.cartridge import Cartridge
+from gameboy.cpu import CPU, Registers
 from gameboy.interrupts import Interrupt
 from gameboy.memory import Bus
 from gameboy.memory_map import (
@@ -351,3 +352,80 @@ def test_a_plain_bus_leaves_the_lcd_off(bus: Bus) -> None:
     assert bus.ppu.ly == 0
     assert bus.ppu.frames == 0
     assert not get_bit(bus.read(INTERRUPT_FLAG), Interrupt.VBLANK)
+
+
+# --- task 7: the loop the emulator has never escaped -------------------------
+
+
+def test_a_rom_waiting_on_ly_gets_out_of_its_wait_loop() -> None:
+    # What Tetris does at 0x022F: turn the LCD on, spin until LY reaches 148 —
+    # the fifth line of VBlank — and only then turn the LCD off to load VRAM
+    # with the whole address space to itself.
+    program = [
+        0x3E,
+        0x80,  # LD A, 0x80
+        0xE0,
+        0x40,  # LDH (0x40), A   -> LCDC, bit 7 set: LCD on
+        0xF0,
+        0x44,  # LDH A, (0x44)   -> LY            \
+        0xFE,
+        0x94,  # CP 0x94         -> 148            } the wait loop
+        0x20,
+        0xFA,  # JR NZ, -6                        /
+        0x04,  # INC B           -> got out
+        0x3E,
+        0x03,  # LD A, 0x03
+        0xE0,
+        0x40,  # LDH (0x40), A   -> LCDC, bit 7 clear: LCD off
+        0x18,
+        0xFE,  # JR -2           -> spin here
+    ]
+
+    image = bytearray(0x8000)
+    image[0x0100 : 0x0100 + len(program)] = bytes(program)
+
+    bus = Bus.post_boot(Cartridge.from_bytes(bytes(image)))
+    cpu = CPU(bus, Registers.post_boot())
+
+    for _ in range(20_000):  # bounded: a stuck wait loop must fail, not hang
+        bus.tick(cpu.step())
+
+    assert cpu.registers.b == 1
+    assert bus.ppu.ly == 0  # the LCD went off, which parks LY at 0
+    assert not get_bit(bus.read(LCDC), 7)
+
+
+def test_a_stray_write_to_ly_cannot_desynchronise_the_wait_loop() -> None:
+    # The same wait loop, with a write to LY inside it. LY is read-only, so the
+    # write is dropped and the loop still ends. If the bus let it through, LY
+    # would be pushed back to 0 on every pass and 148 would never arrive.
+    program = [
+        0x3E,
+        0x80,  # LD A, 0x80
+        0xE0,
+        0x40,  # LDH (0x40), A   -> LCD on
+        0x3E,
+        0x00,  # LD A, 0x00      \
+        0xE0,
+        0x44,  # LDH (0x44), A    |  the stray write
+        0xF0,
+        0x44,  # LDH A, (0x44)    |
+        0xFE,
+        0x94,  # CP 0x94          |
+        0x20,
+        0xF6,  # JR NZ, -10      /
+        0x04,  # INC B
+        0x18,
+        0xFE,  # JR -2
+    ]
+
+    image = bytearray(0x8000)
+    image[0x0100 : 0x0100 + len(program)] = bytes(program)
+
+    bus = Bus.post_boot(Cartridge.from_bytes(bytes(image)))
+    cpu = CPU(bus, Registers.post_boot())
+
+    for _ in range(40_000):
+        bus.tick(cpu.step())
+
+    assert cpu.registers.b == 1
