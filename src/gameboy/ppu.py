@@ -2,9 +2,9 @@ from dataclasses import dataclass, field
 from enum import IntEnum
 from typing import Final, Self
 
-from gameboy.bits import get_bit
+from gameboy.bits import get_bit, to_signed8
 from gameboy.interrupts import Interrupt
-from gameboy.memory_map import BGP, LCDC, LY, LYC, OPEN_BUS, SCX, SCY, STAT
+from gameboy.memory_map import BGP, LCDC, LY, LYC, OPEN_BUS, SCX, SCY, STAT, VRAM
 
 # Not modelled in this class:
 # - VRAM and OAM blocking.
@@ -98,6 +98,7 @@ TILE_MAP_0: Final = 0x9800
 TILE_MAP_1: Final = 0x9C00
 
 _LCD_ENABLE: Final = 7  # LCDC bit 7, it stops the PPU
+_TILE_DATA_SELECT: Final = 4  # LCDC bit 4. Set means the 0x8000 method
 _STAT_UNUSED: Final = 0x80  # bit 7, not wired, reads 1
 _STAT_SELECTS: Final = 0x78  # bits 6-3, allowed for write select
 
@@ -238,6 +239,18 @@ class PPU:
 
         return interrupts
 
+    def tile_row(self, index: int, row: int) -> tuple[int, ...]:
+        address = self._tile_address(index) + row * 2
+        offset = address - VRAM.start
+
+        return decode_row_index(self.vram[offset], self.vram[offset + 1])
+
+    def _tile_address(self, index: int) -> int:
+        if get_bit(self.lcdc, _TILE_DATA_SELECT):
+            return TILE_DATA_UNSIGNED + index * TILE_SIZE
+
+        return TILE_DATA_SIGNED + to_signed8(index) * TILE_SIZE
+
     def _stat_byte(self) -> int:
         selects = self.stat & _STAT_SELECTS
         lyc_match = self.ly == self.lyc
@@ -268,3 +281,11 @@ class PPU:
         self.mode = Mode.HBLANK
         self.last_stat_line = False
         self.framebuffer[:] = bytes(len(self.framebuffer))
+
+
+def decode_row_index(low: int, high: int) -> tuple[int, ...]:
+    return tuple(compute_index(bit, high, low) for bit in reversed(range(8)))
+
+
+def compute_index(bit: int, high: int, low: int) -> int:
+    return get_bit(high, bit) << 1 | get_bit(low, bit)

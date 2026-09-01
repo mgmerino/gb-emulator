@@ -24,6 +24,7 @@ from gameboy.ppu import (
     TILE_MAP_0,
     TILE_SIZE,
     Mode,
+    decode_row_index,
 )
 
 
@@ -429,3 +430,56 @@ def test_a_stray_write_to_ly_cannot_desynchronise_the_wait_loop() -> None:
         bus.tick(cpu.step())
 
     assert cpu.registers.b == 1
+
+
+# --- a tile row ---------------------------------------------------
+
+
+def test_a_tile_row_decodes_its_two_bitplanes() -> None:
+    assert decode_row_index(0x3C, 0x7E) == (0, 2, 3, 3, 3, 3, 2, 0)
+
+
+def test_bit_7_is_the_leftmost_pixel() -> None:
+    assert decode_row_index(0x80, 0x00) == (1, 0, 0, 0, 0, 0, 0, 0)
+    assert decode_row_index(0x01, 0x00) == (0, 0, 0, 0, 0, 0, 0, 1)
+
+
+def test_the_first_byte_of_a_row_is_the_low_plane() -> None:
+    # Swapping the planes swaps colours 1 and 2, which looks almost right.
+    assert decode_row_index(0x3C, 0x7E) == (0, 2, 3, 3, 3, 3, 2, 0)
+    assert decode_row_index(0x7E, 0x3C) == (0, 1, 3, 3, 3, 3, 1, 0)
+
+
+def test_tile_row_reads_its_two_bytes_from_vram() -> None:
+    ppu = PPU(lcdc=0x10)  # bit 4 set: the 0x8000 method
+    # Tile 5, row 3: 0x8000 + 5 * 16 + 3 * 2 = 0x8056
+    ppu.vram[0x56] = 0x3C
+    ppu.vram[0x57] = 0x7E
+
+    assert ppu.tile_row(5, 3) == (0, 2, 3, 3, 3, 3, 2, 0)
+
+
+def test_index_0_resolves_differently_in_each_addressing_mode() -> None:
+    unsigned = PPU(lcdc=0x10)
+    unsigned.vram[0x0000] = 0xFF  # 0x8000, where the unsigned method starts
+    unsigned.vram[0x0001] = 0xFF
+
+    signed = PPU(lcdc=0x00)
+    signed.vram[0x1000] = 0xFF  # 0x9000, where the signed method counts from
+    signed.vram[0x1001] = 0xFF
+
+    assert unsigned.tile_row(0x00, 0) == (3,) * 8
+    assert signed.tile_row(0x00, 0) == (3,) * 8
+    # Each only sees its own base, so the other one reads blank.
+    assert PPU(lcdc=0x00, vram=unsigned.vram).tile_row(0x00, 0) == (0,) * 8
+
+
+@pytest.mark.parametrize("lcdc", [0x10, 0x00])
+def test_index_0x80_lands_on_0x8800_in_both_modes(lcdc: int) -> None:
+    # 0x8000 + 128 * 16 and 0x9000 + (-128) * 16 are the same byte: block 1,
+    # the overlap that lets a tile be reachable from either end.
+    ppu = PPU(lcdc=lcdc)
+    ppu.vram[0x0800] = 0xFF  # 0x8800
+    ppu.vram[0x0801] = 0xFF
+
+    assert ppu.tile_row(0x80, 0) == (3,) * 8
