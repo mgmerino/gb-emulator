@@ -307,7 +307,7 @@ collects this into one place.
   allocates nothing. In Ruby you would return an array and pay for it.
 - **Deriving instead of storing.** `mode` is a pure function of `(ly, dots)` and
   `STAT` bits 2-0 are a pure function of `(mode, ly, lyc)`. Two fields exist
-  anyway — `mode` and `stat_line` — and section 4 of the questions asks you to
+  anyway — `mode` and `last_stat_line` — and section 4 of the questions asks you to
   say why.
 
 ---
@@ -345,7 +345,7 @@ class PPU:
     scx: int = 0
     bgp: int = 0
     mode: Mode = Mode.OAM_SCAN
-    stat_line: bool = False   # what the OR gate read on the previous sample
+    last_stat_line: bool = False   # the OR gate's previous sample
     frames: int = 0           # completed frames, for the CLI to count
 ```
 
@@ -455,7 +455,8 @@ raises it twice.
 
 **STAT** on the rising edge of the OR. One helper that computes the line's
 current level from `(mode, ly, lyc, stat)`, and one comparison against
-`stat_line`. The shape is `Timer._advance_tima` with the polarity flipped. If
+`last_stat_line`, named after its sibling `Timer.last_and`. The shape is
+`Timer._advance_tima` with the polarity flipped. If
 your version does not look like a sibling of it, one of the two is doing more
 than it needs to.
 
@@ -474,7 +475,8 @@ fire on level instead of edge.
 ### 5. Turning the LCD off
 
 Per section 6. When `LCDC` bit 7 goes from set to clear: `ly = 0`, `dots = 0`,
-mode to `HBLANK`, `stat_line` to `False`, and fill the framebuffer with shade 0.
+mode to `HBLANK`, `last_stat_line` to `False`, and fill the framebuffer with
+shade 0.
 
 While bit 7 is clear, `tick` returns immediately: no counting, no interrupts.
 
