@@ -15,6 +15,7 @@ from gameboy.cpu import CPU, Registers, UnknownOpcodeError
 from gameboy.encoding import Instruction
 from gameboy.instructions import CB_OPCODES, OPCODES
 from gameboy.memory import Bus, MemoryDevice
+from gameboy.ppu import PPU
 from gameboy.timer import Timer
 
 type Row = tuple[int, int, str]
@@ -231,7 +232,7 @@ def main() -> int:
             f"{args.dump + args.length:#06x} ({args.length} bytes)"
         )
         print("--- BEGIN ---")
-        print(dump(Bus(cartridge, Timer()), args.dump, args.length))
+        print(dump(Bus(cartridge, Timer(), PPU()), args.dump, args.length))
         print("--- END ---\n")
     elif args.trace is not None:
         executed = 0
@@ -240,7 +241,7 @@ def main() -> int:
         exit_code = 0
 
         try:
-            for line, cycles in trace(Bus(cartridge, Timer()), args.trace):
+            for line, cycles in trace(Bus(cartridge, Timer(), PPU()), args.trace):
                 print(line)
                 executed += 1
                 total_cycles += cycles
@@ -253,7 +254,7 @@ def main() -> int:
         print(trace_summary(executed, total_cycles, reason))
         return exit_code
     elif args.run is not None:
-        bus = Bus(cartridge, Timer())
+        bus = Bus(cartridge, Timer(), PPU())
         executed = 0
         total_cycles = 0
         reason = f"reached the {args.run} instruction limit"
