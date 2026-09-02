@@ -41,6 +41,13 @@ INTERRUPT_FLAG_UNUSED: Final = 0xE0
 OPEN_BUS: Final = 0xFF
 PROHIBITED_READ: Final = 0x00
 
+# Joypad
+JOYPAD: Final = 0xFF00
+# Bits 7-6 are unwired and read as 1. Bits 5-4 are the two select lines, which
+# the CPU writes. Bits 3-0 report the buttons, and a 0 means PRESSED.
+JOYPAD_SELECT: Final = 0x30
+JOYPAD_NONE_PRESSED: Final = 0xCF
+
 # Serial link cable
 SERIAL_DATA: Final = 0xFF01
 SERIAL_CONTROL: Final = 0xFF02

@@ -25,7 +25,7 @@ tour:
 | 09 | [Timer, divider and the falling-edge detector](docs/STEP_09.md) | done |
 | 10 | Blargg `cpu_instrs` — arrived with Step 09's serial port | done |
 | 11A | [The PPU as a clock: modes, LCD registers, interrupts](docs/STEP_11A.md) | done |
-| 11B | [The PPU as a renderer: tiles, maps, scrolling](docs/STEP_11B.md) | in progress |
+| 11B | [The PPU as a renderer: tiles, maps, scrolling](docs/STEP_11B.md) | done |
 
 ## Requirements
 
@@ -110,6 +110,39 @@ Passed
 --- 300000 instructions, 2916120 T-cycles, reached the 300000 instruction limit ---
 ```
 
+Run until a given frame has completed, and look at it. Without `--out` the frame
+prints as text, one character per pixel from a four-character ramp, so the
+terminal you are already in is the display:
+
+```
+uv run python -m gameboy path/to/TETRIS.gb --frame 600 --budget 12000000
+```
+
+```
+###... +      ####### ######## #######  ######## ###########  ####### ###...###
+###... +      #     # #     ## #    ##  #     ##  #       ##  #     # #  ...###
+###... +      #    #  #     ##  #   ##  #     ##   #      ##  #    #  #  ...###
+###... +      #   #   #     ##   #  ##  #     ##    #     ##  #   #   #  ...###
+###... +      #..#    #.....##    #.##  #.....##       #..##  #..#    #.....###
+###... +      #.#     #.....##     ###  #.....##        #.##  #.#     #.....###
+###... +              #+++++##          #+++++##    #.##              #++...###
+###... +              ########          ########   #####              ###...###
+```
+
+With `--out` it writes a binary PGM instead, which every image viewer opens and
+which needs no dependency:
+
+```
+uv run python -m gameboy path/to/TETRIS.gb --frame 600 --out title.pgm --budget 12000000
+```
+
+`--budget` caps the instructions spent looking for that frame, so a ROM that
+never reaches VBlank stops instead of hanging. Frame 120 is Tetris's copyright
+screen; the title screen arrives around frame 600.
+
+`experiments/frame_to_png.py` does the same thing as a PNG, and its docstring
+explains why the CLI ships the simpler format.
+
 ## Test ROMs
 
 Blargg's suite reports its verdict on the LCD and, byte by byte, over the serial
@@ -147,8 +180,13 @@ Two things do not work yet:
 ## The PPU
 
 The PPU counts dots, walks the four modes, reports its position through the LCD
-registers, and raises `VBlank` and `LCD_STAT`. It does not draw yet: Step 11B
-turns what a ROM writes into VRAM into 160×144 bytes.
+registers, raises `VBlank` and `LCD_STAT`, and draws the background: 160×144
+bytes, one per pixel, each of them a shade `0`–`3`.
+
+What a shade looks like is not the core's business. `PLAN.md` constraint 1 says
+the core exposes a framebuffer and nothing else, so the same 23040 bytes become
+a character ramp in the terminal, a PGM through `--out`, or a PNG in
+`experiments/`, purely by changing the four-entry table they index.
 
 The renderer this is being built towards is a **scanline renderer**, not a dot
 renderer. The hardware produces one pixel per dot through a fetcher and an
@@ -172,19 +210,25 @@ FIFO, and the `LY == 153` quirk.
 
 ## What is missing
 
-The emulator keeps time and now keeps a display clock, so a real game gets
-through its setup:
+Tetris boots, and its title screen is on the previous section's terms: a
+background of tiles, and nothing else.
 
-```
-0233: F0 44    LDH A, (FF44)    ; LY, the line the PPU is drawing
-0235: FE 94    CP  A, 0x94      ; 148, the fifth line of VBlank
-0237: 20 FA    JR  NZ, -6
-0239: 3E 03    LD  A, 0x03      ; reached — this writes LCDC and stops the LCD
-```
+**Sprites and the window.** The menu cursor is missing from that title screen
+because it is an object, and objects are Step 12. `LCDC` bits 6, 5, 2 and 1 are
+stored and ignored on purpose.
 
-Tetris now clears its memory, sets up sound and palettes, and loads its font:
-3625 of the 6144 tile-data bytes and all 1024 cells of tile map 0. What it
-cannot do is show any of it. That is Step 11B.
+**The joypad.** `0xFF00` answers "no button pressed" and nothing more, which is
+a stub and not an implementation. It exists because the register is active-low:
+letting it fall through to the generic IO array reports every button held at
+once, and a ROM polling it never leaves its title screen. Step 14 makes it real.
+
+**Timing a ROM can measure.** VRAM and OAM are readable during mode 3, mode 3 is
+fixed at its 172-dot minimum, and there is no pixel FIFO — so a game that
+changes `SCX` mid-line gets the line's final value across the whole line. The
+full list, with the reason for each, is the comment at the top of `ppu.py`.
+
+**Bigger cartridges.** No MBC, so anything past 32 KiB stops at the bank
+boundary. That is Step 15.
 
 ## Development
 

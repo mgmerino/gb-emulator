@@ -7,6 +7,7 @@ from gameboy.memory_map import (
     BGP,
     DIVIDER,
     INTERRUPT_FLAG,
+    JOYPAD,
     LCDC,
     LY,
     LYC,
@@ -192,10 +193,12 @@ def test_oam_round_trip(bus: Bus) -> None:
 
 
 def test_io_round_trip(bus: Bus) -> None:
-    bus.write(0xFF00, 0x76)
+    # 0xFF10 is sound, which nothing claims yet. 0xFF00 used to stand in for a
+    # generic IO byte and cannot any more: the joypad answers for it.
+    bus.write(0xFF10, 0x76)
     bus.write(0xFF7F, 0x67)
 
-    assert bus.read(0xFF00) == 0x76
+    assert bus.read(0xFF10) == 0x76
     assert bus.read(0xFF7F) == 0x67
 
 
@@ -405,3 +408,31 @@ def test_the_lcd_registers_do_not_fall_through_to_the_io_array(
     bus.write(address, 0x11)
 
     assert bus.io[address - 0xFF00] == 0x00
+
+
+@pytest.mark.parametrize("address", [0x8000, 0x9000, 0x9FFF])
+def test_vram_routes_to_the_ppu(bus: Bus, address: int) -> None:
+    bus.write(address, 0x5A)
+
+    assert bus.read(address) == 0x5A
+    assert bus.ppu.vram[address - 0x8000] == 0x5A
+
+
+def test_the_joypad_reports_nothing_pressed(bus: Bus) -> None:
+    # Active-low: a 0 in bits 3-0 means the button is held. Falling through to
+    # the io array would report all four at once.
+    bus.write(JOYPAD, 0x20)  # select the action buttons
+
+    assert bus.read(JOYPAD) & 0x0F == 0x0F
+
+
+def test_the_joypad_reads_back_its_select_lines(bus: Bus) -> None:
+    bus.write(JOYPAD, 0x10)
+
+    assert bus.read(JOYPAD) & 0x30 == 0x10
+
+
+def test_the_joypad_top_bits_are_unwired(bus: Bus) -> None:
+    bus.write(JOYPAD, 0x00)
+
+    assert bus.read(JOYPAD) & 0xC0 == 0xC0

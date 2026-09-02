@@ -24,6 +24,7 @@ from gameboy.ppu import (
     TILE_MAP_0,
     TILE_SIZE,
     Mode,
+    decode_row_index,
 )
 
 
@@ -429,3 +430,240 @@ def test_a_stray_write_to_ly_cannot_desynchronise_the_wait_loop() -> None:
         bus.tick(cpu.step())
 
     assert cpu.registers.b == 1
+
+
+# --- a tile row ---------------------------------------------------
+
+
+def test_a_tile_row_decodes_its_two_bitplanes() -> None:
+    assert decode_row_index(0x3C, 0x7E) == (0, 2, 3, 3, 3, 3, 2, 0)
+
+
+def test_bit_7_is_the_leftmost_pixel() -> None:
+    assert decode_row_index(0x80, 0x00) == (1, 0, 0, 0, 0, 0, 0, 0)
+    assert decode_row_index(0x01, 0x00) == (0, 0, 0, 0, 0, 0, 0, 1)
+
+
+def test_the_first_byte_of_a_row_is_the_low_plane() -> None:
+    # Swapping the planes swaps colours 1 and 2, which looks almost right.
+    assert decode_row_index(0x3C, 0x7E) == (0, 2, 3, 3, 3, 3, 2, 0)
+    assert decode_row_index(0x7E, 0x3C) == (0, 1, 3, 3, 3, 3, 1, 0)
+
+
+def test_tile_row_reads_its_two_bytes_from_vram() -> None:
+    ppu = PPU(lcdc=0x10)  # bit 4 set: the 0x8000 method
+    # Tile 5, row 3: 0x8000 + 5 * 16 + 3 * 2 = 0x8056
+    ppu.vram[0x56] = 0x3C
+    ppu.vram[0x57] = 0x7E
+
+    assert ppu.tile_row(5, 3) == (0, 2, 3, 3, 3, 3, 2, 0)
+
+
+def test_index_0_resolves_differently_in_each_addressing_mode() -> None:
+    unsigned = PPU(lcdc=0x10)
+    unsigned.vram[0x0000] = 0xFF  # 0x8000, where the unsigned method starts
+    unsigned.vram[0x0001] = 0xFF
+
+    signed = PPU(lcdc=0x00)
+    signed.vram[0x1000] = 0xFF  # 0x9000, where the signed method counts from
+    signed.vram[0x1001] = 0xFF
+
+    assert unsigned.tile_row(0x00, 0) == (3,) * 8
+    assert signed.tile_row(0x00, 0) == (3,) * 8
+    # Each only sees its own base, so the other one reads blank.
+    assert PPU(lcdc=0x00, vram=unsigned.vram).tile_row(0x00, 0) == (0,) * 8
+
+
+@pytest.mark.parametrize("lcdc", [0x10, 0x00])
+def test_index_0x80_lands_on_0x8800_in_both_modes(lcdc: int) -> None:
+    # 0x8000 + 128 * 16 and 0x9000 + (-128) * 16 are the same byte: block 1,
+    # the overlap that lets a tile be reachable from either end.
+    ppu = PPU(lcdc=lcdc)
+    ppu.vram[0x0800] = 0xFF  # 0x8800
+    ppu.vram[0x0801] = 0xFF
+
+    assert ppu.tile_row(0x80, 0) == (3,) * 8
+
+
+# --- 11B task 3: the background scanline --------------------------------------
+
+# 0x3C 0x7E decodes to (0, 2, 3, 3, 3, 3, 2, 0), the row worked out by hand in
+# the step doc. Every row of the tile carries it, so any SCY shows the same line.
+PATTERN = (0, 2, 3, 3, 3, 3, 2, 0)
+
+
+def ppu_showing_one_tile(*rows: tuple[int, int]) -> PPU:
+    """A PPU whose whole background is tile 0: LCD and BG on, identity palette.
+
+    The tile map is already all zeros, so every cell names tile 0.
+    """
+    ppu = PPU(lcdc=0x91, bgp=0xE4)  # LCD on, tile data 0x8000, map 0x9800, BG on
+    for r, (low, high) in enumerate(rows or ((0x3C, 0x7E),) * 8):
+        ppu.vram[r * 2] = low
+        ppu.vram[r * 2 + 1] = high
+
+    return ppu
+
+
+def test_a_line_repeats_the_tile_across_all_160_columns() -> None:
+    ppu = ppu_showing_one_tile()
+
+    run_dots(ppu, 70224)
+
+    assert tuple(ppu.framebuffer[0:160]) == PATTERN * 20
+
+
+def test_the_whole_visible_area_is_drawn() -> None:
+    ppu = ppu_showing_one_tile()
+
+    run_dots(ppu, 70224)
+
+    for line in range(144):
+        start = line * 160
+        assert tuple(ppu.framebuffer[start : start + 160]) == PATTERN * 20, line
+
+
+def test_scx_shifts_the_line_and_wraps() -> None:
+    ppu = ppu_showing_one_tile()
+    ppu.scx = 4
+
+    run_dots(ppu, 70224)
+
+    shifted = PATTERN[4:] + PATTERN[:4]
+    assert tuple(ppu.framebuffer[0:160]) == shifted * 20
+
+
+def test_scy_picks_the_row_within_the_tile() -> None:
+    # Row 0 blank, row 1 solid, the rest blank.
+    rows = [(0x00, 0x00), (0xFF, 0xFF)] + [(0x00, 0x00)] * 6
+    ppu = ppu_showing_one_tile(*rows)
+    ppu.scy = 1
+
+    run_dots(ppu, 70224)
+
+    assert tuple(ppu.framebuffer[0:160]) == (3,) * 160
+
+
+def test_bgp_maps_indices_to_shades() -> None:
+    ppu = ppu_showing_one_tile()
+    ppu.bgp = 0x1B  # 00 01 10 11: index n becomes shade 3 - n
+
+    run_dots(ppu, 70224)
+
+    inverted = tuple(3 - index for index in PATTERN)
+    assert tuple(ppu.framebuffer[0:160]) == inverted * 20
+
+
+def test_the_background_can_be_switched_off() -> None:
+    ppu = ppu_showing_one_tile()
+    ppu.lcdc &= ~0b1  # LCDC bit 0 clear: no background at all
+
+    run_dots(ppu, 70224)
+
+    assert set(ppu.framebuffer) == {0}
+
+
+def test_the_frame_is_exposed_read_only() -> None:
+    ppu = ppu_showing_one_tile()
+
+    run_dots(ppu, 70224)
+
+    assert len(ppu.frame) == 23040
+    assert bytes(ppu.frame[0:8]) == bytes(PATTERN)
+    with pytest.raises(TypeError):
+        ppu.frame[0] = 1  # type: ignore[index]
+
+
+def test_lcdc_bit_3_selects_the_second_tile_map() -> None:
+    ppu = ppu_showing_one_tile()
+    ppu.vram[0x10:0x20] = bytes([0xFF] * 16)  # tile 1 at 0x8010, solid
+    ppu.vram[0x1C00:0x2000] = bytes([1] * 1024)  # map 1 at 0x9C00, all tile 1
+
+    run_dots(ppu, 70224)
+
+    assert tuple(ppu.framebuffer[0:160]) == PATTERN * 20
+
+    ppu.lcdc |= 0b1000  # LCDC bit 3: read map 1 from now on
+    run_dots(ppu, 70224)
+
+    assert tuple(ppu.framebuffer[0:160]) == (3,) * 160
+
+
+def test_the_raw_colour_indices_are_kept_for_step_12() -> None:
+    ppu = ppu_showing_one_tile()
+    ppu.bgp = 0x1B  # index n becomes shade 3 - n, so the two arrays disagree
+
+    run_dots(ppu, 70224)
+
+    assert tuple(ppu.framebuffer[0:8]) == tuple(3 - index for index in PATTERN)
+    assert tuple(ppu.line_indices[0:8]) == PATTERN
+
+
+# --- 11B task 6: the torus, and not reading what you do not need ---------------
+
+
+def ppu_with_solid_cells(*cells: int) -> PPU:
+    """Tile 0 is blank and tile 1 is solid; the named map-0 cells get tile 1.
+
+    Cell n is at row n // 32, column n % 32, so cell 31 is the far right of the
+    top row and cells 992-1023 are the bottom row of the 256x256 background.
+    """
+    ppu = PPU(lcdc=0x91, bgp=0xE4)
+    ppu.vram[0x10:0x20] = bytes([0xFF] * 16)  # tile 1 at 0x8010, index 3 everywhere
+    for cell in cells:
+        ppu.vram[0x1800 + cell] = 1  # tile map 0 is at 0x9800
+
+    return ppu
+
+
+def line_of(ppu: PPU, line: int) -> bytearray:
+    """The 160 shades of one screen line, sliced out of the flat framebuffer."""
+    return ppu.framebuffer[line * SCREEN_WIDTH : (line + 1) * SCREEN_WIDTH]
+
+
+def test_scx_wraps_past_255_back_to_the_left_edge() -> None:
+    # The last column of the map, so the screen has to come round the torus to
+    # reach it. background_x runs 252, 253, 254, 255, then 0.
+    ppu = ppu_with_solid_cells(31)
+    ppu.scx = 252
+
+    run_dots(ppu, 70224)
+
+    assert tuple(ppu.framebuffer[0:4]) == (3, 3, 3, 3)
+    assert set(ppu.framebuffer[4:160]) == {0}
+
+
+def test_scy_moves_a_whole_cell_down_not_just_a_row_of_pixels() -> None:
+    # Cells 32-63 are the second row of the map. Reaching them needs the // 8,
+    # which is the half of background_y that the % 8 does not answer.
+    ppu = ppu_with_solid_cells(*range(32, 64))
+    ppu.scy = 8
+
+    run_dots(ppu, 70224)
+
+    assert set(ppu.framebuffer[0:160]) == {3}
+
+
+def test_the_background_off_never_reaches_vram(monkeypatch: pytest.MonkeyPatch) -> None:
+    ppu = ppu_showing_one_tile()
+    ppu.lcdc &= ~0b1  # LCDC bit 0 clear
+    monkeypatch.setattr(
+        PPU, "tile_row", lambda *_: pytest.fail("fetched a tile with the BG off")
+    )
+
+    run_dots(ppu, 70224)
+
+    assert set(ppu.framebuffer) == {0}
+
+
+def test_scy_wraps_past_255_back_to_the_top() -> None:
+    ppu = ppu_with_solid_cells(*range(32))
+    ppu.scy = 250
+
+    run_dots(ppu, 70224)
+
+    for line in range(6):
+        assert set(line_of(ppu, line)) == {0}, line
+    for line in range(6, 14):
+        assert set(line_of(ppu, line)) == {3}, line
+    assert set(line_of(ppu, 14)) == {0}

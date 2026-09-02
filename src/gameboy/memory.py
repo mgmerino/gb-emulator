@@ -26,7 +26,6 @@ class Bus:
         self.cartridge = cartridge
         self.wram = bytearray(0x2000)
         self.hram = bytearray(0x7F)
-        self.vram = bytearray(0x2000)
         self.oam = bytearray(0xA0)
         self.io = bytearray(0x80)
         self.ie = 0
@@ -59,6 +58,13 @@ class Bus:
                 return self.cartridge.read(masked_address)
             case _ if masked_address in memory_map.TIMER_REGISTERS:
                 return self.timer.read(masked_address)
+            case memory_map.JOYPAD:
+                # stub buttons as released:
+                stored = self.io[masked_address - memory_map.IO.start]
+
+                return (
+                    stored & memory_map.JOYPAD_SELECT
+                ) | memory_map.JOYPAD_NONE_PRESSED
             case _ if masked_address in memory_map.SERIAL_REGISTERS:
                 return self.serial.read(masked_address)
             case _ if (
@@ -73,7 +79,7 @@ class Bus:
             case _ if masked_address in memory_map.WRAM:
                 return self.wram[masked_address - memory_map.WRAM.start]
             case _ if masked_address in memory_map.VRAM:
-                return self.vram[masked_address - memory_map.VRAM.start]
+                return self.ppu.vram[masked_address - memory_map.VRAM.start]
             case _ if masked_address in memory_map.ECHO_RAM:
                 return self.read(masked_address - memory_map.ECHO_OFFSET)
             case _ if masked_address in memory_map.OAM:
@@ -113,7 +119,7 @@ class Bus:
             case _ if masked_address in memory_map.WRAM:
                 self.wram[masked_address - memory_map.WRAM.start] = masked_value
             case _ if masked_address in memory_map.VRAM:
-                self.vram[masked_address - memory_map.VRAM.start] = masked_value
+                self.ppu.vram[masked_address - memory_map.VRAM.start] = masked_value
             case _ if masked_address in memory_map.ECHO_RAM:
                 self.write(masked_address - memory_map.ECHO_OFFSET, masked_value)
             case _ if masked_address in memory_map.OAM:

@@ -462,14 +462,22 @@ VRAM by hand rather than loading a ROM.
 
 ```
 uv run python -m gameboy ~/games/TETRIS.gb --frame 120
+uv run python -m gameboy ~/games/TETRIS.gb --frame 600 --budget 12000000
 ```
 
-Expect the copyright and title screen's **background**. The menu cursor is a
-sprite and will not be there; that is Step 12, not a bug.
+Frame 120 is the copyright screen and frame 600 is the title screen. The menu
+cursor is a sprite and will be on neither; that is Step 12, not a bug.
 
 Expect the first thing you see to be wrong in some specific way: mirrored tiles,
 or colours 1 and 2 swapped. Section 2 named both in advance so you can recognise
-which one you are looking at instead of guessing.
+which one you are looking at instead of guessing — but **look at frame 600 to
+judge the second one**. The copyright screen's font is monochrome, its two
+bitplanes identical, so swapping them changes not one pixel. Print the shade
+histogram if you want to see that for yourself: on frame 120 shades 1 and 2 are
+both at 0%.
+
+On frame 600, each letter of the logo is bevelled light-to-dark going down. With
+the planes swapped that gradient inverts and the logo reads as lit from below.
 
 If the frame is blank, work backwards in this order: is `LCDC` bit 7 set at the
 moment you dumped, is bit 0 set, does the tile map contain anything but zeros,

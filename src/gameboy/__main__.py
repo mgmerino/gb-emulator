@@ -1,9 +1,11 @@
 """CLI entry point: `python -m gameboy <rom>` prints a cartridge summary."""
 
 import argparse
+import sys
 from collections.abc import Iterator
 from itertools import batched
 from pathlib import Path
+from typing import Final
 
 from gameboy.cartridge import (
     Cartridge,
@@ -199,6 +201,49 @@ def trace(bus: Bus, instructions: int) -> Iterator[tuple[str, int]]:
         )
 
 
+SHADE_RAMP: Final = " .+#"
+SHADE_GREY: Final = bytes((0xFF, 0xAA, 0x55, 0x00))
+
+
+def frame_as_text(frame: memoryview) -> str:
+    """One character per pixel, from a four-character ramp.
+
+    160 columns is wide but it fits, and seeing the answer without leaving the
+    shell is worth more than fidelity here.
+    """
+    return "\n".join(
+        "".join(SHADE_RAMP[shade] for shade in frame[row * 160 : (row + 1) * 160])
+        for row in range(144)
+    )
+
+
+def frame_as_pgm(frame: memoryview) -> bytes:
+    """The frame as a binary PGM, which every image viewer opens and no
+    dependency is needed to write.
+
+    P5 is greyscale, one byte per pixel, and the whole header is three lines.
+    """
+    header = b"P5\n160 144\n255\n"
+
+    return header + bytes(SHADE_GREY[shade] for shade in frame)
+
+
+def render_frames(bus: Bus, frames: int, instructions: int) -> tuple[bool, int]:
+    """Run until `frames` have completed. Returns whether it got there, and the
+    instruction count.
+
+    The instruction budget is what stops a ROM that never reaches VBlank from
+    hanging the CLI.
+    """
+    executed = 0
+    for _cpu, _address, _cycles in run(bus, instructions):
+        executed += 1
+        if bus.ppu.frames >= frames:
+            return True, executed
+
+    return False, executed
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(
         prog="gameboy", description="Inspect a Game Boy cartridge."
@@ -212,6 +257,24 @@ def main() -> int:
         type=int,
         default=None,
         help="run without per-instruction output, then print the serial log",
+    )
+    parser.add_argument(
+        "--frame",
+        type=int,
+        default=None,
+        help="run until N frames have completed, then show the last one",
+    )
+    parser.add_argument(
+        "--out",
+        type=Path,
+        default=None,
+        help="with --frame, write a binary PGM here instead of printing",
+    )
+    parser.add_argument(
+        "--budget",
+        type=int,
+        default=5_000_000,
+        help="with --frame, the instruction limit before giving up",
     )
     args = parser.parse_args()
 
@@ -275,6 +338,22 @@ def main() -> int:
 
         print(trace_summary(executed, total_cycles, reason))
         return exit_code
+    elif args.frame is not None:
+        bus = Bus.post_boot(cartridge)
+        reached, executed = render_frames(bus, args.frame, args.budget)
+
+        if not reached:
+            print(
+                f"gameboy: only {bus.ppu.frames} frames in {executed} instructions",
+                file=sys.stderr,
+            )
+            return 1
+
+        if args.out is not None:
+            args.out.write_bytes(frame_as_pgm(bus.ppu.frame))
+            print(f"wrote {args.out} after {executed} instructions")
+        else:
+            print(frame_as_text(bus.ppu.frame))
     else:
         print(describe(cartridge))
 
