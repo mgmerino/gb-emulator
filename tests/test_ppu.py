@@ -597,3 +597,73 @@ def test_the_raw_colour_indices_are_kept_for_step_12() -> None:
 
     assert tuple(ppu.framebuffer[0:8]) == tuple(3 - index for index in PATTERN)
     assert tuple(ppu.line_indices[0:8]) == PATTERN
+
+
+# --- 11B task 6: the torus, and not reading what you do not need ---------------
+
+
+def ppu_with_solid_cells(*cells: int) -> PPU:
+    """Tile 0 is blank and tile 1 is solid; the named map-0 cells get tile 1.
+
+    Cell n is at row n // 32, column n % 32, so cell 31 is the far right of the
+    top row and cells 992-1023 are the bottom row of the 256x256 background.
+    """
+    ppu = PPU(lcdc=0x91, bgp=0xE4)
+    ppu.vram[0x10:0x20] = bytes([0xFF] * 16)  # tile 1 at 0x8010, index 3 everywhere
+    for cell in cells:
+        ppu.vram[0x1800 + cell] = 1  # tile map 0 is at 0x9800
+
+    return ppu
+
+
+def line_of(ppu: PPU, line: int) -> bytearray:
+    """The 160 shades of one screen line, sliced out of the flat framebuffer."""
+    return ppu.framebuffer[line * SCREEN_WIDTH : (line + 1) * SCREEN_WIDTH]
+
+
+def test_scx_wraps_past_255_back_to_the_left_edge() -> None:
+    # The last column of the map, so the screen has to come round the torus to
+    # reach it. background_x runs 252, 253, 254, 255, then 0.
+    ppu = ppu_with_solid_cells(31)
+    ppu.scx = 252
+
+    run_dots(ppu, 70224)
+
+    assert tuple(ppu.framebuffer[0:4]) == (3, 3, 3, 3)
+    assert set(ppu.framebuffer[4:160]) == {0}
+
+
+def test_scy_moves_a_whole_cell_down_not_just_a_row_of_pixels() -> None:
+    # Cells 32-63 are the second row of the map. Reaching them needs the // 8,
+    # which is the half of background_y that the % 8 does not answer.
+    ppu = ppu_with_solid_cells(*range(32, 64))
+    ppu.scy = 8
+
+    run_dots(ppu, 70224)
+
+    assert set(ppu.framebuffer[0:160]) == {3}
+
+
+def test_the_background_off_never_reaches_vram(monkeypatch: pytest.MonkeyPatch) -> None:
+    ppu = ppu_showing_one_tile()
+    ppu.lcdc &= ~0b1  # LCDC bit 0 clear
+    monkeypatch.setattr(
+        PPU, "tile_row", lambda *_: pytest.fail("fetched a tile with the BG off")
+    )
+
+    run_dots(ppu, 70224)
+
+    assert set(ppu.framebuffer) == {0}
+
+
+def test_scy_wraps_past_255_back_to_the_top() -> None:
+    ppu = ppu_with_solid_cells(*range(32))
+    ppu.scy = 250
+
+    run_dots(ppu, 70224)
+
+    for line in range(6):
+        assert set(line_of(ppu, line)) == {0}, line
+    for line in range(6, 14):
+        assert set(line_of(ppu, line)) == {3}, line
+    assert set(line_of(ppu, 14)) == {0}
