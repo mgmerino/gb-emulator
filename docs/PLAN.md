@@ -63,7 +63,8 @@ something you can run and observe**, never in "trust me, we'll use this later".
 | 10 | Blargg `cpu_instrs` harness | **Serial output says "Passed" — the CPU is provably correct** |
 | 11A | PPU as a clock: dot counter, modes, LCD registers, interrupts | A ROM gets past its VBlank wait loop |
 | 11B | PPU as a renderer: tiles, background map, scrolling | Dump a rendered frame as a PNG/PPM |
-| 12 | PPU part 2: window & sprites (OAM) | Full frame composition |
+| 12A | PPU: objects, OAM and the DMA | Tetris's menu cursor appears |
+| 12B | PPU: the window, and the three layers composed | Full frame composition |
 | 13 | Screen output & frame pacing | See Nintendo's boot logo scroll down, at the right speed |
 | 14 | Joypad | Play something |
 | 15 | MBC1/MBC3, external RAM, battery saves | Load real, bigger games and keep save files |
