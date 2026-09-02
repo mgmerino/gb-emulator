@@ -17,3 +17,4 @@ them.
 | Script | Question |
 | --- | --- |
 | `dispatch_shapes.py` | Does `if` / `elif` / `match` / `dict` dispatch cost different amounts, and does it matter for the memory bus? |
+| `frame_to_png.py` | How do you get a viewable image out of the framebuffer, with no dependency? |
