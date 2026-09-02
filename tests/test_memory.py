@@ -405,3 +405,12 @@ def test_the_lcd_registers_do_not_fall_through_to_the_io_array(
     bus.write(address, 0x11)
 
     assert bus.io[address - 0xFF00] == 0x00
+
+
+@pytest.mark.parametrize("address", [0x8000, 0x9000, 0x9FFF])
+def test_vram_routes_to_the_ppu(bus: Bus, address: int) -> None:
+    bus.write(address, 0x5A)
+
+    assert bus.read(address) == 0x5A
+    assert bus.ppu.vram[address - 0x8000] == 0x5A
+
