@@ -58,6 +58,13 @@ class Bus:
                 return self.cartridge.read(masked_address)
             case _ if masked_address in memory_map.TIMER_REGISTERS:
                 return self.timer.read(masked_address)
+            case memory_map.JOYPAD:
+                # stub buttons as released:
+                stored = self.io[masked_address - memory_map.IO.start]
+
+                return (
+                    stored & memory_map.JOYPAD_SELECT
+                ) | memory_map.JOYPAD_NONE_PRESSED
             case _ if masked_address in memory_map.SERIAL_REGISTERS:
                 return self.serial.read(masked_address)
             case _ if (
