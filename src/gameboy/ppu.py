@@ -4,7 +4,19 @@ from typing import Final, Self
 
 from gameboy.bits import get_bit, to_signed8
 from gameboy.interrupts import Interrupt
-from gameboy.memory_map import BGP, LCDC, LY, LYC, OPEN_BUS, SCX, SCY, STAT, VRAM
+from gameboy.memory_map import (
+    BGP,
+    LCDC,
+    LY,
+    LYC,
+    OBP0,
+    OBP1,
+    OPEN_BUS,
+    SCX,
+    SCY,
+    STAT,
+    VRAM,
+)
 
 # Not modelled in this class:
 # - VRAM and OAM blocking.
@@ -93,6 +105,7 @@ DRAWING_DOTS: Final = 172
 # Region for dispatch
 VRAM_SIZE: Final = 0x2000
 TILE_SIZE: Final = 16  # bytes: 8 rows × 2 bitplanes
+OAM_SIZE: Final = 160
 # Bases for arithmetic
 TILE_DATA_UNSIGNED: Final = 0x8000
 TILE_DATA_SIGNED: Final = 0x9000
@@ -160,6 +173,9 @@ class PPU:
     # Step 12 needs them: sprite priority asks whether the background's colour
     # *index* was 0, and BGP can map index 0 to black, so a shade cannot answer.
     line_indices: bytearray = field(default_factory=lambda: bytearray(SCREEN_WIDTH))
+    oam: bytearray = field(default_factory=lambda: bytearray(OAM_SIZE))
+    obp0: int = 0
+    obp1: int = 0
 
     @classmethod
     def post_boot(cls) -> Self:
@@ -184,6 +200,10 @@ class PPU:
             return self.lyc
         if address == BGP:
             return self.bgp
+        if address == OBP0:
+            return self.obp0
+        if address == OBP1:
+            return self.obp1
 
         return OPEN_BUS
 
@@ -209,6 +229,12 @@ class PPU:
             return
         if address == BGP:
             self.bgp = value
+            return
+        if address == OBP0:
+            self.obp0 = value
+            return
+        if address == OBP1:
+            self.obp1 = value
             return
 
     def tick(self, cycles: int) -> tuple[Interrupt, ...]:
