@@ -364,7 +364,7 @@ sides of a possible swap give the same answer, the test cannot see the swap.
 ### 3. The line's objects
 
 ```python
-def _sprites_on_line(self, ly: int) -> list[Sprite]:
+def sprites_on_line(self, ly: int) -> list[Sprite]:
     """The objects covering line `ly`, at most ten, in OAM order."""
 ```
 
@@ -373,6 +373,11 @@ stop at ten. Height comes from `LCDC` bit 2.
 
 Return them in OAM order. The priority sort is task 4's business, and doing it
 here would hide which order the ten were chosen in.
+
+Public, not `_`-prefixed, for the same reason `tile_row` is: the ten-per-line
+limit is close to untestable through the framebuffer, so the test has to reach
+the list itself. The height helper behind it stays private and is covered
+through this method, the way `_tile_address` is covered through `tile_row`.
 
 **Acceptance:** twelve objects all covering line 0 give ten, and they are entries
 0 to 9. An object at X = 0 covering line 0 is one of the ten. An 8×8 object at

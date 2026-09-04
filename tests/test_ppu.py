@@ -17,6 +17,7 @@ from gameboy.memory_map import (
     STAT,
 )
 from gameboy.ppu import (
+    MAX_SPRITES_PER_LINE,
     PPU,
     SCREEN_HEIGHT,
     SCREEN_WIDTH,
@@ -680,3 +681,75 @@ def test_sprite_decode_properties_from_input_bytes() -> None:
     assert not sprite.flip_on_y
     assert sprite.flip_on_x
     assert not sprite.uses_obp1
+
+
+# --- 12A task 3: the objects on one line --------------------------------------
+
+# Y = 16 puts an object's top edge on screen row 0, so every entry below covers
+# line 0 unless it says otherwise. Tiles number the entries so a returned list
+# says which ones survived.
+ON_LINE_0 = 16
+
+
+def ppu_with_oam(*entries: tuple[int, int, int, int], lcdc: int = 0x91) -> PPU:
+    """A PPU whose OAM holds `entries` from index 0. The other slots stay zeroed,
+    and Y = 0 keeps them off every line.
+    """
+    ppu = PPU(lcdc=lcdc)
+    for index, entry in enumerate(entries):
+        start = index * 4
+        ppu.oam[start : start + 4] = bytes(entry)
+
+    return ppu
+
+
+def test_only_the_first_ten_objects_on_a_line_survive() -> None:
+    ppu = ppu_with_oam(*((ON_LINE_0, 8, tile, 0) for tile in range(12)))
+
+    on_line = ppu.sprites_on_line(0)
+
+    assert len(on_line) == MAX_SPRITES_PER_LINE
+    assert [sprite.tile for sprite in on_line] == list(range(10))
+
+
+def test_an_object_off_the_left_edge_still_spends_a_slot() -> None:
+    # Entry 0 sits at X = 0, eight columns left of the screen and invisible.
+    ppu = ppu_with_oam(
+        *((ON_LINE_0, 0 if tile == 0 else 8, tile, 0) for tile in range(11))
+    )
+
+    on_line = ppu.sprites_on_line(0)
+
+    assert [sprite.tile for sprite in on_line] == list(range(10))
+
+
+def test_a_short_object_covers_eight_lines() -> None:
+    ppu = ppu_with_oam((ON_LINE_0, 8, 0, 0))
+
+    assert [ppu.sprites_on_line(line) != [] for line in range(9)] == [True] * 8 + [
+        False
+    ]
+
+
+def test_the_line_above_a_short_object_is_the_last_one_it_misses() -> None:
+    # Y = 8 is one row short of reaching line 0; Y = 9 reaches it and nothing else.
+    above = ppu_with_oam((8, 8, 0, 0))
+    touching = ppu_with_oam((9, 8, 0, 0))
+
+    assert above.sprites_on_line(0) == []
+    assert len(touching.sprites_on_line(0)) == 1
+    assert touching.sprites_on_line(1) == []
+
+
+def test_lcdc_bit_2_makes_an_object_sixteen_lines_tall() -> None:
+    ppu = ppu_with_oam((ON_LINE_0, 8, 0, 0), lcdc=0x95)
+
+    assert [ppu.sprites_on_line(line) != [] for line in range(17)] == [True] * 16 + [
+        False
+    ]
+
+
+def test_an_empty_oam_puts_nothing_on_any_line() -> None:
+    ppu = PPU(lcdc=0x91)
+
+    assert all(ppu.sprites_on_line(line) == [] for line in range(SCREEN_HEIGHT))
