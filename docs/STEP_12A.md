@@ -338,11 +338,26 @@ Give it the four flag questions as properties, named for what they mean rather
 than for their bit number: whether it is behind the background, the two flips,
 and which palette.
 
-**Acceptance:** decode the bytes `0x10 0x08 0x2F 0xA0` and assert screen position
-`(0, 0)`, tile `0x2F`, behind the background, X-flipped, not Y-flipped, palette
-`OBP0`. `0xA0` is `1010 0000`, so bits 7 and 5 are the set ones. Work that out
-from the diagram in section 3 before running it: a record that reports both flips
-set, or that swaps them, passes a test written from the prose alone.
+The palette one answers *which of the two*, not what is in it. The record has no
+reference to the PPU, so it cannot reach `obp0` and `obp1`, and returning the
+register's address would hand task 4 a number it would have to translate back.
+A bool or a 0/1 is the whole answer.
+
+Screen position is the other pair worth a name. Task 3 compares in raw OAM
+coordinates and task 4 draws in screen coordinates, so both forms get used and
+the subtraction should exist in exactly one place.
+
+**Acceptance:** decode the bytes `0x20 0x10 0x2F 0xA0` and assert screen position
+x = 8 and y = 16, tile `0x2F`, behind the background, X-flipped, not Y-flipped,
+palette `OBP0`. `0xA0` is `1010 0000`, so bits 7 and 5 are the set ones. Work
+that out from the diagram in section 3 before running it: a record that reports
+both flips set, or that swaps them, passes a test written from the prose alone.
+
+The two coordinates are deliberately different numbers, and so are their offsets.
+`0x20 - 16` is 16 and `0x10 - 8` is 8. A record that swaps the two fields, or the
+two offsets, or both, lands on 24 and 0 and the test fails. Pick your assertion
+values the same way whenever a record has two fields of the same type: if both
+sides of a possible swap give the same answer, the test cannot see the swap.
 
 ---
 
