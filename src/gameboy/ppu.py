@@ -1,6 +1,6 @@
 from dataclasses import dataclass, field
 from enum import IntEnum
-from typing import Final, Self
+from typing import Final, NamedTuple, Self
 
 from gameboy.bits import get_bit, to_signed8
 from gameboy.interrupts import Interrupt
@@ -102,6 +102,8 @@ LINES_PER_FRAME: Final = 154
 SCANLINE_DOTS: Final = 456
 OAM_SCAN_DOTS: Final = 80
 DRAWING_DOTS: Final = 172
+SPRITE_X_OFFSET: Final = 8
+SPRITE_Y_OFFSET: Final = 16
 # Region for dispatch
 VRAM_SIZE: Final = 0x2000
 TILE_SIZE: Final = 16  # bytes: 8 rows × 2 bitplanes
@@ -117,6 +119,11 @@ _LCD_ENABLE: Final = 7  # LCDC bit 7, it stops the PPU
 _TILE_DATA_SELECT: Final = 4  # LCDC bit 4. Set means the 0x8000 method
 _BG_ENABLE: Final = 0  # LCDC bit 0. Clear means the background is not drawn at all.
 _BG_TILE_MAP: Final = 3  # LCDC bit 3. Set means map 1 (0x9C00), clear means map 0.
+# Priority: 0 = No, 1 = BG and Window color indices 1–3 are drawn over this OBJ
+_SPRITE_PRIORITY: Final = 7
+_SPRITE_Y_FLIP: Final = 6
+_SPRITE_X_FLIP: Final = 5
+_SPRITE_PALETTE: Final = 4
 
 _STAT_UNUSED: Final = 0x80  # bit 7, not wired, reads 1
 _STAT_SELECTS: Final = 0x78  # bits 6-3, allowed for write select
@@ -127,6 +134,39 @@ class Mode(IntEnum):
     VBLANK = 1
     OAM_SCAN = 2
     DRAWING = 3
+
+
+class Sprite(NamedTuple):
+    """OAM entry. Coordinates hold the offset."""
+
+    y: int
+    x: int
+    tile: int
+    flags: int
+
+    @property
+    def screen_y(self) -> int:
+        return self.y - SPRITE_Y_OFFSET
+
+    @property
+    def screen_x(self) -> int:
+        return self.x - SPRITE_X_OFFSET
+
+    @property
+    def behind_background(self) -> bool:
+        return get_bit(self.flags, _SPRITE_PRIORITY)
+
+    @property
+    def flip_on_y(self) -> bool:
+        return get_bit(self.flags, _SPRITE_Y_FLIP)
+
+    @property
+    def flip_on_x(self) -> bool:
+        return get_bit(self.flags, _SPRITE_X_FLIP)
+
+    @property
+    def uses_obp1(self) -> bool:
+        return get_bit(self.flags, _SPRITE_PALETTE)
 
 
 @dataclass(slots=True)

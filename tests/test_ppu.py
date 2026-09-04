@@ -24,6 +24,7 @@ from gameboy.ppu import (
     TILE_MAP_0,
     TILE_SIZE,
     Mode,
+    Sprite,
     decode_row_index,
 )
 
@@ -667,3 +668,15 @@ def test_scy_wraps_past_255_back_to_the_top() -> None:
     for line in range(6, 14):
         assert set(line_of(ppu, line)) == {3}, line
     assert set(line_of(ppu, 14)) == {0}
+
+
+def test_sprite_decode_properties_from_input_bytes() -> None:
+    sprite = Sprite(0x20, 0x10, 0x2F, 0xA0)
+
+    assert sprite.screen_y == 16
+    assert sprite.screen_x == 8
+    assert sprite.tile == 0x2F
+    assert sprite.behind_background
+    assert not sprite.flip_on_y
+    assert sprite.flip_on_x
+    assert not sprite.uses_obp1
