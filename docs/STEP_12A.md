@@ -399,6 +399,61 @@ The eight columns of one object are `x - 8` through `x - 1`. Some of those fall
 outside 0–159 and are dropped. There is no wrapping here: unlike the background,
 objects have edges.
 
+`tile_row` cannot be reused as it stands. It reaches VRAM through
+`_tile_address`, which honours `LCDC` bit 4, and objects ignore that bit: they
+are always `0x8000` plus an unsigned index, per section 1. A ROM running with
+bit 4 clear will draw its background correctly and its objects from the wrong
+half of VRAM.
+
+What forks is the address, not the decoding:
+
+```
+                        which base address?
+                                 │
+              ┌──────────────────┴──────────────────┐
+              │                                     │
+         BACKGROUND                             OBJECTS
+      LCDC bit 4 decides                    always 0x8000
+              │                                     │
+     _tile_address(index)                 0x8000 + index * 16
+              │                                     │
+              └──────────────────┬──────────────────┘
+                                 │
+                       address of the tile
+                                 │
+                              + row * 2       the row inside the tile
+                                 │
+                            - VRAM.start      address to bytearray index
+                                 │
+                    two bytes: low plane, high plane
+                                 │
+                       decode_row_index(low, high)
+                                 │
+                       (0, 2, 3, 3, 3, 3, 2, 0)
+```
+
+From "address of the tile" downward the two layers are identical. So the object
+reader is a *sibling* of `tile_row`, not a layer beneath it: same three lines,
+and only the first one differs. Neither calls the other.
+
+Factoring those three lines into a shared helper is possible and not worth it.
+It buys one line and costs a level of indirection between two methods that
+already return the same type, which is exactly the sort of stack that is hard to
+hold in your head.
+
+The row within the object and the tile to read come out of the same three steps,
+in this order:
+
+```
+    row = ly - sprite.screen_y                   # 0 … height-1
+    if Y flip:   row = height - 1 - row
+    8x16:        tile = (sprite.tile & 0xFE) + row // 8,   row = row % 8
+    8x8:         tile = sprite.tile
+```
+
+Flipping before the split is what makes the two halves of a tall object swap
+without a second branch.
+
 **Acceptance:** one 8×8 object at Y = 16, X = 8 with a known tile puts that
 tile's top row at framebuffer columns 0–7 of line 0. Its index-0 pixels leave the
 background's shade in place. With flag bit 7 set and a background whose index is
