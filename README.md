@@ -26,6 +26,7 @@ tour:
 | 10 | Blargg `cpu_instrs` — arrived with Step 09's serial port | done |
 | 11A | [The PPU as a clock: modes, LCD registers, interrupts](docs/STEP_11A.md) | done |
 | 11B | [The PPU as a renderer: tiles, maps, scrolling](docs/STEP_11B.md) | done |
+| 12A | [Objects: OAM, the DMA, priority and flips](docs/STEP_12A.md) | done |
 
 ## Requirements
 
@@ -206,16 +207,16 @@ game to measure against.
 
 Also not modelled, and listed at the top of `ppu.py` with the reason for each:
 VRAM and OAM blocking during mode 3, the variable length of mode 3, the pixel
-FIFO, and the `LY == 153` quirk.
+FIFO, the `LY == 153` quirk, and the OAM DMA's 640 dots.
 
 ## What is missing
 
-Tetris boots, and its title screen is on the previous section's terms: a
-background of tiles, and nothing else.
+Tetris boots and draws its title screen, cursor included: the background from
+Step 11B, and the `1PLAYER` arrow from Step 12A, which is OAM entry 0 pushed
+across by the DMA once a frame.
 
-**Sprites and the window.** The menu cursor is missing from that title screen
-because it is an object, and objects are Step 12. `LCDC` bits 6, 5, 2 and 1 are
-stored and ignored on purpose.
+**The window.** The third layer is still missing, so `LCDC` bits 6 and 5 are
+stored and ignored on purpose, along with `WY` and `WX`. That is Step 12B.
 
 **The joypad.** `0xFF00` answers "no button pressed" and nothing more, which is
 a stub and not an implementation. It exists because the register is active-low:

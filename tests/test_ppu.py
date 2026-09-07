@@ -487,6 +487,19 @@ def test_index_0x80_lands_on_0x8800_in_both_modes(lcdc: int) -> None:
     assert ppu.tile_row(0x80, 0) == (3,) * 8
 
 
+@pytest.mark.parametrize("lcdc", [0x10, 0x00])
+def test_objects_read_their_tiles_the_0x8000_way_whatever_bit_4_says(
+    lcdc: int,
+) -> None:
+    # Tile 0 unsigned is at 0x8000, tile 0 signed at 0x9000. The background
+    # follows LCDC bit 4 between them; an object never does.
+    ppu = PPU(lcdc=lcdc)
+    ppu.vram[0x0000:0x0002] = bytes((0xFF, 0xFF))
+    ppu.vram[0x1000:0x1002] = bytes((0x00, 0x00))
+
+    assert ppu.object_tile_row(0x00, 0) == (3,) * 8
+
+
 # --- 11B task 3: the background scanline --------------------------------------
 
 # 0x3C 0x7E decodes to (0, 2, 3, 3, 3, 3, 2, 0), the row worked out by hand in
@@ -573,7 +586,7 @@ def test_the_frame_is_exposed_read_only() -> None:
     assert len(ppu.frame) == 23040
     assert bytes(ppu.frame[0:8]) == bytes(PATTERN)
     with pytest.raises(TypeError):
-        ppu.frame[0] = 1  # type: ignore[index]
+        ppu.frame[0] = 1
 
 
 def test_lcdc_bit_3_selects_the_second_tile_map() -> None:
@@ -753,3 +766,239 @@ def test_an_empty_oam_puts_nothing_on_any_line() -> None:
     ppu = PPU(lcdc=0x91)
 
     assert all(ppu.sprites_on_line(line) == [] for line in range(SCREEN_HEIGHT))
+
+
+# --- 12A task 4: objects drawn over the background ----------------------------
+
+# Five tiles, all in the 0x8000 block, all rows identical unless noted:
+#   0 at 0x8000  the background, whatever index the helper is asked for
+#   1 at 0x8010  PATTERN, so (0, 2, 3, 3, 3, 3, 2, 0): transparent at both ends
+#   2 at 0x8020  index 1 everywhere
+#   3 at 0x8030  index 2 everywhere
+#   4 at 0x8040  index 1 in the leftmost pixel only, so it is not a palindrome
+#   5 at 0x8050  index 1 across row 0 only, so the rows differ
+PATTERN_TILE = 1
+FLAT_1_TILE = 2
+FLAT_2_TILE = 3
+LEFT_EDGE_TILE = 4
+TOP_ROW_TILE = 5
+# LCD on, tile data 0x8000, map 0, background on, objects on.
+LCDC_OBJECTS = 0x93
+
+
+def ppu_drawing_objects(
+    *entries: tuple[int, int, int, int],
+    lcdc: int = LCDC_OBJECTS,
+    background: int = 0,
+) -> PPU:
+    """Every palette is the identity, so a shade and a colour index read alike.
+
+    `background` is the colour index every background pixel carries, which is
+    what decides whether a behind-the-background object can show.
+    """
+    ppu = PPU(lcdc=lcdc, bgp=0xE4, obp0=0xE4, obp1=0xE4)
+    low = 0xFF if background & 0b01 else 0x00
+    high = 0xFF if background & 0b10 else 0x00
+    ppu.vram[0x00:0x10] = bytes((low, high) * 8)
+    ppu.vram[0x10:0x20] = bytes((0x3C, 0x7E) * 8)
+    ppu.vram[0x20:0x30] = bytes((0xFF, 0x00) * 8)
+    ppu.vram[0x30:0x40] = bytes((0x00, 0xFF) * 8)
+    ppu.vram[0x40:0x50] = bytes((0x80, 0x00) * 8)
+    ppu.vram[0x50:0x60] = bytes((0xFF, 0x00)) + bytes(14)
+
+    for index, entry in enumerate(entries):
+        ppu.oam[index * 4 : index * 4 + 4] = bytes(entry)
+
+    return ppu
+
+
+def test_an_object_draws_its_row_over_the_background() -> None:
+    ppu = ppu_drawing_objects((ON_LINE_0, 8, PATTERN_TILE, 0), background=1)
+
+    run_dots(ppu, 70224)
+
+    assert tuple(line_of(ppu, 0)[0:8]) == (1, 2, 3, 3, 3, 3, 2, 1)
+
+
+def test_colour_index_0_lets_the_background_through() -> None:
+    # The two ends of PATTERN are index 0, and only those two keep the background.
+    ppu = ppu_drawing_objects((ON_LINE_0, 8, PATTERN_TILE, 0), background=1)
+
+    run_dots(ppu, 70224)
+
+    line = line_of(ppu, 0)
+    assert (line[0], line[7]) == (1, 1)
+    assert set(line[1:7]) == {2, 3}
+
+
+def test_an_object_behind_a_non_empty_background_lands_nowhere() -> None:
+    ppu = ppu_drawing_objects((ON_LINE_0, 8, FLAT_1_TILE, 0x80), background=2)
+
+    run_dots(ppu, 70224)
+
+    assert set(line_of(ppu, 0)) == {2}
+
+
+def test_an_object_behind_an_empty_background_lands_everywhere() -> None:
+    ppu = ppu_drawing_objects((ON_LINE_0, 8, FLAT_1_TILE, 0x80), background=0)
+
+    run_dots(ppu, 70224)
+
+    assert tuple(line_of(ppu, 0)[0:8]) == (1,) * 8
+
+
+def test_the_smaller_x_is_in_front() -> None:
+    ppu = ppu_drawing_objects(
+        (ON_LINE_0, 8, FLAT_1_TILE, 0),  # screen columns 0-7
+        (ON_LINE_0, 12, FLAT_2_TILE, 0),  # screen columns 4-11
+    )
+
+    run_dots(ppu, 70224)
+
+    line = line_of(ppu, 0)
+    assert tuple(line[0:8]) == (1,) * 8
+    assert tuple(line[8:12]) == (2,) * 4
+
+
+def test_an_equal_x_falls_back_to_the_oam_order() -> None:
+    ppu = ppu_drawing_objects(
+        (ON_LINE_0, 8, FLAT_2_TILE, 0),
+        (ON_LINE_0, 8, FLAT_1_TILE, 0),
+    )
+
+    run_dots(ppu, 70224)
+
+    assert tuple(line_of(ppu, 0)[0:8]) == (2,) * 8
+
+
+def test_an_object_hidden_by_the_background_keeps_the_one_behind_it_out() -> None:
+    # Entry 0 is in front and loses to the background, but it still owns its
+    # eight columns. Entry 1 only reaches the one column entry 0 does not cover.
+    ppu = ppu_drawing_objects(
+        (ON_LINE_0, 8, FLAT_1_TILE, 0x80),  # screen columns 0-7, behind the background
+        (ON_LINE_0, 9, FLAT_2_TILE, 0),  # screen columns 1-8
+        background=1,
+    )
+
+    run_dots(ppu, 70224)
+
+    line = line_of(ppu, 0)
+    assert tuple(line[0:8]) == (1,) * 8
+    assert line[8] == 2
+
+
+def test_the_x_flip_mirrors_the_row_inside_the_object() -> None:
+    plain = ppu_drawing_objects((ON_LINE_0, 8, LEFT_EDGE_TILE, 0), background=2)
+    flipped = ppu_drawing_objects((ON_LINE_0, 8, LEFT_EDGE_TILE, 0x20), background=2)
+
+    run_dots(plain, 70224)
+    run_dots(flipped, 70224)
+
+    assert tuple(line_of(plain, 0)[0:8]) == (1, 2, 2, 2, 2, 2, 2, 2)
+    assert tuple(line_of(flipped, 0)[0:8]) == (2, 2, 2, 2, 2, 2, 2, 1)
+
+
+def test_the_y_flip_mirrors_the_rows_inside_the_object() -> None:
+    plain = ppu_drawing_objects((ON_LINE_0, 8, TOP_ROW_TILE, 0), background=2)
+    flipped = ppu_drawing_objects((ON_LINE_0, 8, TOP_ROW_TILE, 0x40), background=2)
+
+    run_dots(plain, 70224)
+    run_dots(flipped, 70224)
+
+    assert [line_of(plain, line)[0] for line in range(8)] == [1] + [2] * 7
+    assert [line_of(flipped, line)[0] for line in range(8)] == [2] * 7 + [1]
+
+
+@pytest.mark.parametrize("tile", [FLAT_1_TILE, FLAT_1_TILE | 1])
+def test_lcdc_bit_2_stacks_the_tile_pair_and_ignores_bit_0_of_the_index(
+    tile: int,
+) -> None:
+    ppu = ppu_drawing_objects((ON_LINE_0, 8, tile, 0), lcdc=LCDC_OBJECTS | 0x04)
+
+    run_dots(ppu, 70224)
+
+    assert [line_of(ppu, line)[0] for line in range(16)] == [1] * 8 + [2] * 8
+
+
+def test_a_tall_objects_halves_swap_under_a_y_flip() -> None:
+    ppu = ppu_drawing_objects(
+        (ON_LINE_0, 8, FLAT_1_TILE, 0x40), lcdc=LCDC_OBJECTS | 0x04
+    )
+
+    run_dots(ppu, 70224)
+
+    assert [line_of(ppu, line)[0] for line in range(16)] == [2] * 8 + [1] * 8
+
+
+def test_lcdc_bit_1_clear_draws_no_objects() -> None:
+    ppu = ppu_drawing_objects(
+        (ON_LINE_0, 8, FLAT_1_TILE, 0), lcdc=LCDC_OBJECTS & ~0x02, background=2
+    )
+
+    run_dots(ppu, 70224)
+
+    assert set(line_of(ppu, 0)) == {2}
+
+
+def test_lcdc_bit_0_clear_blanks_the_background_but_keeps_the_objects() -> None:
+    ppu = ppu_drawing_objects(
+        (ON_LINE_0, 8, FLAT_1_TILE, 0), lcdc=LCDC_OBJECTS & ~0x01, background=2
+    )
+
+    run_dots(ppu, 70224)
+
+    line = line_of(ppu, 0)
+    assert tuple(line[0:8]) == (1,) * 8
+    assert set(line[8:]) == {0}
+
+
+def test_objects_ignore_the_tile_data_select_bit() -> None:
+    # Bit 4 clear sends the background to 0x9000, which is blank. The object
+    # still reads its tile from 0x8000 and shows up.
+    ppu = ppu_drawing_objects(
+        (ON_LINE_0, 8, FLAT_1_TILE, 0), lcdc=LCDC_OBJECTS & ~0x10, background=3
+    )
+
+    run_dots(ppu, 70224)
+
+    line = line_of(ppu, 0)
+    assert tuple(line[0:8]) == (1,) * 8
+    assert set(line[8:]) == {0}
+
+
+@pytest.mark.parametrize(
+    ("x", "visible"),
+    [(4, slice(0, 4)), (164, slice(156, 160))],
+)
+def test_an_object_hanging_off_an_edge_is_clipped(x: int, visible: slice) -> None:
+    ppu = ppu_drawing_objects((ON_LINE_0, x, FLAT_1_TILE, 0), background=2)
+
+    run_dots(ppu, 70224)
+
+    line = line_of(ppu, 0)
+    assert set(line[visible]) == {1}
+    assert line.count(1) == 4
+
+
+def test_colour_index_0_is_transparent_whatever_the_palette_maps_it_to() -> None:
+    # OBP0 sends index 0 to shade 3 here. Transparency is decided on the index,
+    # before the palette, so the two ends of PATTERN must still show the
+    # background rather than shade 3.
+    ppu = ppu_drawing_objects((ON_LINE_0, 8, PATTERN_TILE, 0), background=1)
+    ppu.obp0 = 0b11_10_01_11
+
+    run_dots(ppu, 70224)
+
+    line = line_of(ppu, 0)
+    assert (line[0], line[7]) == (1, 1)
+
+
+@pytest.mark.parametrize(("flags", "shade"), [(0x00, 1), (0x10, 3)])
+def test_flag_bit_4_picks_which_object_palette_is_used(flags: int, shade: int) -> None:
+    # OBP0 is the identity, so index 1 is shade 1. OBP1 sends index 1 to shade 3.
+    ppu = ppu_drawing_objects((ON_LINE_0, 8, FLAT_1_TILE, flags))
+    ppu.obp1 = 0b11_10_11_00
+
+    run_dots(ppu, 70224)
+
+    assert tuple(line_of(ppu, 0)[0:8]) == (shade,) * 8
