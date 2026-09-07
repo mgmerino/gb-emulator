@@ -487,6 +487,19 @@ def test_index_0x80_lands_on_0x8800_in_both_modes(lcdc: int) -> None:
     assert ppu.tile_row(0x80, 0) == (3,) * 8
 
 
+@pytest.mark.parametrize("lcdc", [0x10, 0x00])
+def test_objects_read_their_tiles_the_0x8000_way_whatever_bit_4_says(
+    lcdc: int,
+) -> None:
+    # Tile 0 unsigned is at 0x8000, tile 0 signed at 0x9000. The background
+    # follows LCDC bit 4 between them; an object never does.
+    ppu = PPU(lcdc=lcdc)
+    ppu.vram[0x0000:0x0002] = bytes((0xFF, 0xFF))
+    ppu.vram[0x1000:0x1002] = bytes((0x00, 0x00))
+
+    assert ppu.object_tile_row(0x00, 0) == (3,) * 8
+
+
 # --- 11B task 3: the background scanline --------------------------------------
 
 # 0x3C 0x7E decodes to (0, 2, 3, 3, 3, 3, 2, 0), the row worked out by hand in

@@ -345,6 +345,15 @@ class PPU:
 
         return TILE_DATA_SIGNED + to_signed8(index) * TILE_SIZE
 
+    def object_tile_row(self, index: int, row: int) -> tuple[int, ...]:
+        address = self._object_tile_address(index) + row * 2
+        offset = address - VRAM.start
+
+        return decode_row_index(self.vram[offset], self.vram[offset + 1])
+
+    def _object_tile_address(self, index: int) -> int:
+        return TILE_DATA_UNSIGNED + index * TILE_SIZE
+
     @property
     def _sprite_height(self) -> int:
         """8 or 16, per `LCDC` bit 2."""
