@@ -23,7 +23,10 @@ from gameboy.memory_map import (
 # - The variable length of mode 3.
 # - The pixel FIFO.
 # - The `LY == 153` quirk.
-# - Sprites and the window.
+# - The window.
+# - The OAM DMA's timing. The transfer lives on the bus and happens in one pass;
+#   the hardware takes 640 dots over it and locks the CPU out of everything but
+#   HRAM while it runs, which is why games call it from a routine copied there.
 #
 # The PPU is clocked by the same 4.194304 MHz crystal as everything else. Its unit of
 # time is a **dot**, and one dot is one T-cycle.

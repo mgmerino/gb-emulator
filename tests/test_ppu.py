@@ -586,7 +586,7 @@ def test_the_frame_is_exposed_read_only() -> None:
     assert len(ppu.frame) == 23040
     assert bytes(ppu.frame[0:8]) == bytes(PATTERN)
     with pytest.raises(TypeError):
-        ppu.frame[0] = 1  # type: ignore[index]
+        ppu.frame[0] = 1
 
 
 def test_lcdc_bit_3_selects_the_second_tile_map() -> None:
@@ -978,6 +978,19 @@ def test_an_object_hanging_off_an_edge_is_clipped(x: int, visible: slice) -> Non
     line = line_of(ppu, 0)
     assert set(line[visible]) == {1}
     assert line.count(1) == 4
+
+
+def test_colour_index_0_is_transparent_whatever_the_palette_maps_it_to() -> None:
+    # OBP0 sends index 0 to shade 3 here. Transparency is decided on the index,
+    # before the palette, so the two ends of PATTERN must still show the
+    # background rather than shade 3.
+    ppu = ppu_drawing_objects((ON_LINE_0, 8, PATTERN_TILE, 0), background=1)
+    ppu.obp0 = 0b11_10_01_11
+
+    run_dots(ppu, 70224)
+
+    line = line_of(ppu, 0)
+    assert (line[0], line[7]) == (1, 1)
 
 
 @pytest.mark.parametrize(("flags", "shade"), [(0x00, 1), (0x10, 3)])
