@@ -127,11 +127,14 @@ _TILE_DATA_SELECT: Final = 4  # LCDC bit 4. Set means the 0x8000 method
 _BG_ENABLE: Final = 0  # LCDC bit 0. Clear means the background is not drawn at all.
 _BG_TILE_MAP: Final = 3  # LCDC bit 3. Set means map 1 (0x9C00), clear means map 0.
 _OBJ_SIZE: Final = 2  # LCDC bit 2. Set means every object is 8x16, not 8x8.
+_OBJ_ENABLE: Final = 1  # LCDC bit 1. Clear means no objects are drawn.
 # Priority: 0 = No, 1 = BG and Window color indices 1–3 are drawn over this OBJ
 _SPRITE_PRIORITY: Final = 7
 _SPRITE_Y_FLIP: Final = 6
 _SPRITE_X_FLIP: Final = 5
 _SPRITE_PALETTE: Final = 4
+# An 8x16 object ignores bit 0 of its tile byte and uses the pair it names.
+_TALL_TILE_MASK: Final = 0xFE
 
 _STAT_UNUSED: Final = 0x80  # bit 7, not wired, reads 1
 _STAT_SELECTS: Final = 0x78  # bits 6-3, allowed for write select
@@ -221,6 +224,7 @@ class PPU:
     # Step 12 needs them: sprite priority asks whether the background's colour
     # *index* was 0, and BGP can map index 0 to black, so a shade cannot answer.
     line_indices: bytearray = field(default_factory=lambda: bytearray(SCREEN_WIDTH))
+    line_claimed: bytearray = field(default_factory=lambda: bytearray(SCREEN_WIDTH))
     oam: bytearray = field(default_factory=lambda: bytearray(OAM_SIZE))
     obp0: int = 0
     obp1: int = 0
@@ -378,9 +382,14 @@ class PPU:
         return on_line
 
     def _render_scanline(self) -> None:
-        """Draw line `ly`"""
+        """Draw line `ly`: the background first, then the objects over it."""
         start = self.ly * SCREEN_WIDTH
 
+        self._render_background_line(start)
+        self._render_objects_line(start)
+
+    def _render_background_line(self, start: int) -> None:
+        """Draw line `ly` of the background into the framebuffer."""
         if not get_bit(self.lcdc, _BG_ENABLE):
             # No background: shade 0 and index 0
             self.framebuffer[start : start + SCREEN_WIDTH] = bytes(SCREEN_WIDTH)
@@ -402,6 +411,79 @@ class PPU:
 
             self.line_indices[x] = index
             self.framebuffer[start + x] = (self.bgp >> (index * 2)) & 0b11
+
+    def _render_objects_line(self, start: int) -> None:
+        """Draw the objects covering line `ly` over the background already there."""
+        # `LCDC` bit 0 is deliberately not consulted. A blank background still
+        # gets objects drawn on top of it, and `_render_background_line` has
+        # already left `line_indices` at 0 for that case, which is what a
+        # behind-the-background object needs in order to show.
+        if not get_bit(self.lcdc, _OBJ_ENABLE):
+            return
+
+        # `line_claimed` says, per column, that some object has already decided
+        # it. Written *into* the buffer rather than rebound, so the field keeps
+        # the same bytearray for the life of the PPU.
+        self.line_claimed[:] = bytes(SCREEN_WIDTH)
+
+        # Smaller X goes in front. `sorted` is stable and `sprites_on_line`
+        # returns in OAM order, so X alone is the whole key: equal X keeps the
+        # OAM order, which is the hardware's tie-break.
+        for sprite in sorted(self.sprites_on_line(self.ly), key=lambda s: s.x):
+            self._draw_object(sprite, start)
+
+    def _draw_object(self, sprite: Sprite, start: int) -> None:
+        """Draw the single row of `sprite` that falls on line `ly`."""
+        height = self._sprite_height
+        row = self.ly - sprite.screen_y
+
+        if sprite.flip_on_y:
+            row = height - 1 - row
+
+        # A tall object is two stacked tiles, so the row picks the half and what
+        # is left over is the row inside it. The flip above has already happened,
+        # which is what swaps the halves without a second branch.
+        if height == SPRITE_HEIGHT_TALL:
+            tile = (sprite.tile & _TALL_TILE_MASK) + row // SPRITE_HEIGHT
+            row %= SPRITE_HEIGHT
+        else:
+            tile = sprite.tile
+
+        # `object_tile_row`, never `tile_row`: objects ignore LCDC bit 4.
+        indices = self.object_tile_row(tile, row)
+
+        # Mirroring the row once beats mirroring every column index.
+        if sprite.flip_on_x:
+            indices = indices[::-1]
+
+        palette = self.obp1 if sprite.uses_obp1 else self.obp0
+
+        for column, index in enumerate(indices):
+            x = sprite.screen_x + column
+
+            # Objects have edges. Nothing wraps here, unlike the background.
+            if not 0 <= x < SCREEN_WIDTH:
+                continue
+
+            # Index 0 is a hole in the stamp: the object is not there at all, so
+            # it neither draws nor claims, and an object behind it may still
+            # take the column.
+            if index == 0:
+                continue
+
+            # An object in front of this one already decided the column.
+            if self.line_claimed[x]:
+                continue
+
+            # Claimed even when the background then wins it below. That is what
+            # stops an object hidden behind the background from handing its
+            # column to the object behind *it*.
+            self.line_claimed[x] = 1
+
+            if sprite.behind_background and self.line_indices[x] != 0:
+                continue
+
+            self.framebuffer[start + x] = (palette >> (index * 2)) & 0b11
 
     @property
     def frame(self) -> memoryview:
