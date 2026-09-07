@@ -72,6 +72,7 @@ LYC: Final = 0xFF45
 BGP: Final = 0xFF47
 OBP0: Final = 0xFF48
 OBP1: Final = 0xFF49
+DMA: Final = 0xFF46
 
 # We need two ranges because 0xFF46 is on the middle and belongs to DMA
 PPU_REGISTERS_1: Final = range(LCDC, LYC + 1)

@@ -436,6 +436,49 @@ def test_obp_round_trips(bus: Bus) -> None:
     assert bus.ppu.obp1 == 0x42
 
 
+def test_the_dma_copies_a_page_of_wram_into_oam(bus: Bus) -> None:
+    bus.write(0xC000, 0x42)
+    bus.write(0xC09F, 0x99)
+
+    bus.write(memory_map.DMA, 0xC0)
+
+    assert bus.ppu.oam[0x00] == 0x42
+    assert bus.ppu.oam[0x9F] == 0x99
+
+
+def test_the_dma_copies_from_rom_too(bus: Bus) -> None:
+    # The `rom` fixture puts 0xAA at 0x0000. Reaching it means the copy goes
+    # through `Bus.read` rather than straight into one region's bytearray.
+    bus.write(memory_map.DMA, 0x00)
+
+    assert bus.ppu.oam[0x00] == 0xAA
+
+
+def test_the_dma_copies_exactly_160_bytes(bus: Bus) -> None:
+    for address in range(0xC000, 0xC100):
+        bus.write(address, 0x77)
+
+    bus.write(memory_map.DMA, 0xC0)
+
+    assert set(bus.ppu.oam) == {0x77}
+    assert len(bus.ppu.oam) == len(memory_map.OAM)
+
+
+def test_the_dma_register_reads_back_the_page_it_was_given(bus: Bus) -> None:
+    bus.write(memory_map.DMA, 0xC0)
+
+    assert bus.read(memory_map.DMA) == 0xC0
+
+
+def test_the_dma_register_is_not_one_of_the_ppus(bus: Bus) -> None:
+    # 0xFF46 is the only address between the two PPU register ranges. Widening
+    # either one over it would hand the write to `ppu.write`, which has no way
+    # to read the source page.
+    assert memory_map.DMA not in memory_map.PPU_REGISTERS_1
+    assert memory_map.DMA not in memory_map.PPU_REGISTERS_2
+    assert bus.ppu.read(memory_map.DMA) == memory_map.OPEN_BUS
+
+
 def test_the_joypad_reports_nothing_pressed(bus: Bus) -> None:
     # Active-low: a 0 in bits 3-0 means the button is held. Falling through to
     # the io array would report all four at once.

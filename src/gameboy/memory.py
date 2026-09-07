@@ -113,6 +113,15 @@ class Bus:
                 or masked_address in memory_map.PPU_REGISTERS_2
             ):
                 self.ppu.write(masked_address, masked_value)
+            case memory_map.DMA:
+                # 160 bytes from anywhere in the map into OAM, in one pass and
+                # for no cycles. Read through `self.read`, because the source
+                # can be ROM, WRAM or echo RAM and only the bus reaches those.
+                # `ppu.oam` starts at 0xFE00, so one offset indexes both sides.
+                source = masked_value << 8
+                for offset in range(len(memory_map.OAM)):
+                    self.ppu.oam[offset] = self.read(source + offset)
+                self.io[masked_address - memory_map.IO.start] = masked_value
             case memory_map.INTERRUPT_FLAG:
                 self.i_flag = masked_value
             case _ if masked_address in memory_map.WRAM:
