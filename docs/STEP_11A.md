@@ -564,7 +564,7 @@ testing your fixture.
 Tetris has been stuck at `0x0233` since Step 08.
 
 ```
-uv run python -m gameboy ~/games/TETRIS.gb --trace 200 | tail -40
+uv run python -m gameboy path/to/TETRIS.gb --trace 200 | tail -40
 ```
 
 Does it get past `0x0237`? Does it write `0x03` to `0xFF40` two instructions

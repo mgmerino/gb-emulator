@@ -507,7 +507,7 @@ and OAM by hand, as 11B's render tests do.
 ### 7. Run the real thing
 
 ```
-uv run python -m gameboy ~/games/TETRIS.gb --frame 600 --budget 12000000
+uv run python -m gameboy path/to/TETRIS.gb --frame 600 --budget 12000000
 ```
 
 Frame 600 is the title screen, and it has exactly one object: OAM entry 0, tile
@@ -521,9 +521,8 @@ what makes tasks 1 to 4 visible.
 If you want to see the cursor without squinting at ASCII, dump the frame with
 `--out` and open the PGM.
 
-None of the other ROMs in a normal collection will help yet. Super Mario Land,
-Wario Land and Batman are MBC1 or MBC3 and stall without bank switching, which is
-Step 15. Tintin hits an opcode the CPU does not know.
+Do not go looking for a second ROM to try. Anything larger than 32 KiB sits
+behind an MBC and stalls without bank switching, which is Step 15.
 
 ---
 
