@@ -70,7 +70,9 @@ SCX: Final = 0xFF43
 LY: Final = 0xFF44
 LYC: Final = 0xFF45
 BGP: Final = 0xFF47
+OBP0: Final = 0xFF48
+OBP1: Final = 0xFF49
 
 # We need two ranges because 0xFF46 is on the middle and belongs to DMA
 PPU_REGISTERS_1: Final = range(LCDC, LYC + 1)
-PPU_REGISTERS_2: Final = BGP
+PPU_REGISTERS_2: Final = range(BGP, OBP1 + 1)

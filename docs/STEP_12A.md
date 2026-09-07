@@ -323,6 +323,7 @@ VRAM was routed in 11B.
 ```python
 class Sprite(NamedTuple):
     """One OAM entry, with the coordinate offsets still in it."""
+
     y: int
     x: int
     tile: int
@@ -337,16 +338,33 @@ Give it the four flag questions as properties, named for what they mean rather
 than for their bit number: whether it is behind the background, the two flips,
 and which palette.
 
-**Acceptance:** decode the bytes `0x10 0x08 0x2F 0xA0` and assert screen position
-`(0, 0)`, tile `0x2F`, behind the background, Y-flipped, not X-flipped, palette
-`OBP0`. Work the flags out from the diagram in section 3 before running it.
+The palette one answers *which of the two*, not what is in it. The record has no
+reference to the PPU, so it cannot reach `obp0` and `obp1`, and returning the
+register's address would hand task 4 a number it would have to translate back.
+A bool or a 0/1 is the whole answer.
+
+Screen position is the other pair worth a name. Task 3 compares in raw OAM
+coordinates and task 4 draws in screen coordinates, so both forms get used and
+the subtraction should exist in exactly one place.
+
+**Acceptance:** decode the bytes `0x20 0x10 0x2F 0xA0` and assert screen position
+x = 8 and y = 16, tile `0x2F`, behind the background, X-flipped, not Y-flipped,
+palette `OBP0`. `0xA0` is `1010 0000`, so bits 7 and 5 are the set ones. Work
+that out from the diagram in section 3 before running it: a record that reports
+both flips set, or that swaps them, passes a test written from the prose alone.
+
+The two coordinates are deliberately different numbers, and so are their offsets.
+`0x20 - 16` is 16 and `0x10 - 8` is 8. A record that swaps the two fields, or the
+two offsets, or both, lands on 24 and 0 and the test fails. Pick your assertion
+values the same way whenever a record has two fields of the same type: if both
+sides of a possible swap give the same answer, the test cannot see the swap.
 
 ---
 
 ### 3. The line's objects
 
 ```python
-def _sprites_on_line(self, ly: int) -> list[Sprite]:
+def sprites_on_line(self, ly: int) -> list[Sprite]:
     """The objects covering line `ly`, at most ten, in OAM order."""
 ```
 
@@ -355,6 +373,11 @@ stop at ten. Height comes from `LCDC` bit 2.
 
 Return them in OAM order. The priority sort is task 4's business, and doing it
 here would hide which order the ten were chosen in.
+
+Public, not `_`-prefixed, for the same reason `tile_row` is: the ten-per-line
+limit is close to untestable through the framebuffer, so the test has to reach
+the list itself. The height helper behind it stays private and is covered
+through this method, the way `_tile_address` is covered through `tile_row`.
 
 **Acceptance:** twelve objects all covering line 0 give ten, and they are entries
 0 to 9. An object at X = 0 covering line 0 is one of the ten. An 8×8 object at

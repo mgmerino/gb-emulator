@@ -26,7 +26,6 @@ class Bus:
         self.cartridge = cartridge
         self.wram = bytearray(0x2000)
         self.hram = bytearray(0x7F)
-        self.oam = bytearray(0xA0)
         self.io = bytearray(0x80)
         self.ie = 0
         self.i_flag = 0
@@ -69,7 +68,7 @@ class Bus:
                 return self.serial.read(masked_address)
             case _ if (
                 masked_address in memory_map.PPU_REGISTERS_1
-                or masked_address == memory_map.PPU_REGISTERS_2
+                or masked_address in memory_map.PPU_REGISTERS_2
             ):
                 return self.ppu.read(masked_address)
             case memory_map.INTERRUPT_FLAG:
@@ -83,7 +82,7 @@ class Bus:
             case _ if masked_address in memory_map.ECHO_RAM:
                 return self.read(masked_address - memory_map.ECHO_OFFSET)
             case _ if masked_address in memory_map.OAM:
-                return self.oam[masked_address - memory_map.OAM.start]
+                return self.ppu.oam[masked_address - memory_map.OAM.start]
             case _ if masked_address in memory_map.IO:
                 return self.io[masked_address - memory_map.IO.start]
             case _ if masked_address in memory_map.HRAM:
@@ -111,7 +110,7 @@ class Bus:
                 self.serial.write(masked_address, masked_value)
             case _ if (
                 masked_address in memory_map.PPU_REGISTERS_1
-                or masked_address == memory_map.PPU_REGISTERS_2
+                or masked_address in memory_map.PPU_REGISTERS_2
             ):
                 self.ppu.write(masked_address, masked_value)
             case memory_map.INTERRUPT_FLAG:
@@ -123,7 +122,7 @@ class Bus:
             case _ if masked_address in memory_map.ECHO_RAM:
                 self.write(masked_address - memory_map.ECHO_OFFSET, masked_value)
             case _ if masked_address in memory_map.OAM:
-                self.oam[masked_address - memory_map.OAM.start] = masked_value
+                self.ppu.oam[masked_address - memory_map.OAM.start] = masked_value
             case _ if masked_address in memory_map.IO:
                 self.io[masked_address - memory_map.IO.start] = masked_value
             case _ if masked_address in memory_map.HRAM:

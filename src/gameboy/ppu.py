@@ -1,10 +1,22 @@
 from dataclasses import dataclass, field
 from enum import IntEnum
-from typing import Final, Self
+from typing import Final, NamedTuple, Self
 
 from gameboy.bits import get_bit, to_signed8
 from gameboy.interrupts import Interrupt
-from gameboy.memory_map import BGP, LCDC, LY, LYC, OPEN_BUS, SCX, SCY, STAT, VRAM
+from gameboy.memory_map import (
+    BGP,
+    LCDC,
+    LY,
+    LYC,
+    OBP0,
+    OBP1,
+    OPEN_BUS,
+    SCX,
+    SCY,
+    STAT,
+    VRAM,
+)
 
 # Not modelled in this class:
 # - VRAM and OAM blocking.
@@ -90,9 +102,19 @@ LINES_PER_FRAME: Final = 154
 SCANLINE_DOTS: Final = 456
 OAM_SCAN_DOTS: Final = 80
 DRAWING_DOTS: Final = 172
+SPRITE_X_OFFSET: Final = 8
+SPRITE_Y_OFFSET: Final = 16
+# The offsets above are the largest object in each axis, which is why the Y one
+# and the tall height below are the same number.
+SPRITE_HEIGHT: Final = 8
+SPRITE_HEIGHT_TALL: Final = 16
+SPRITE_ENTRY_SIZE: Final = 4  # bytes: y, x, tile, flags
+# The hardware's mode 2 buffer holds ten entries and there is no eleventh slot.
+MAX_SPRITES_PER_LINE: Final = 10
 # Region for dispatch
 VRAM_SIZE: Final = 0x2000
 TILE_SIZE: Final = 16  # bytes: 8 rows × 2 bitplanes
+OAM_SIZE: Final = 160
 # Bases for arithmetic
 TILE_DATA_UNSIGNED: Final = 0x8000
 TILE_DATA_SIGNED: Final = 0x9000
@@ -104,6 +126,12 @@ _LCD_ENABLE: Final = 7  # LCDC bit 7, it stops the PPU
 _TILE_DATA_SELECT: Final = 4  # LCDC bit 4. Set means the 0x8000 method
 _BG_ENABLE: Final = 0  # LCDC bit 0. Clear means the background is not drawn at all.
 _BG_TILE_MAP: Final = 3  # LCDC bit 3. Set means map 1 (0x9C00), clear means map 0.
+_OBJ_SIZE: Final = 2  # LCDC bit 2. Set means every object is 8x16, not 8x8.
+# Priority: 0 = No, 1 = BG and Window color indices 1–3 are drawn over this OBJ
+_SPRITE_PRIORITY: Final = 7
+_SPRITE_Y_FLIP: Final = 6
+_SPRITE_X_FLIP: Final = 5
+_SPRITE_PALETTE: Final = 4
 
 _STAT_UNUSED: Final = 0x80  # bit 7, not wired, reads 1
 _STAT_SELECTS: Final = 0x78  # bits 6-3, allowed for write select
@@ -114,6 +142,39 @@ class Mode(IntEnum):
     VBLANK = 1
     OAM_SCAN = 2
     DRAWING = 3
+
+
+class Sprite(NamedTuple):
+    """OAM entry. Coordinates hold the offset."""
+
+    y: int
+    x: int
+    tile: int
+    flags: int
+
+    @property
+    def screen_y(self) -> int:
+        return self.y - SPRITE_Y_OFFSET
+
+    @property
+    def screen_x(self) -> int:
+        return self.x - SPRITE_X_OFFSET
+
+    @property
+    def behind_background(self) -> bool:
+        return get_bit(self.flags, _SPRITE_PRIORITY)
+
+    @property
+    def flip_on_y(self) -> bool:
+        return get_bit(self.flags, _SPRITE_Y_FLIP)
+
+    @property
+    def flip_on_x(self) -> bool:
+        return get_bit(self.flags, _SPRITE_X_FLIP)
+
+    @property
+    def uses_obp1(self) -> bool:
+        return get_bit(self.flags, _SPRITE_PALETTE)
 
 
 @dataclass(slots=True)
@@ -160,6 +221,9 @@ class PPU:
     # Step 12 needs them: sprite priority asks whether the background's colour
     # *index* was 0, and BGP can map index 0 to black, so a shade cannot answer.
     line_indices: bytearray = field(default_factory=lambda: bytearray(SCREEN_WIDTH))
+    oam: bytearray = field(default_factory=lambda: bytearray(OAM_SIZE))
+    obp0: int = 0
+    obp1: int = 0
 
     @classmethod
     def post_boot(cls) -> Self:
@@ -184,6 +248,10 @@ class PPU:
             return self.lyc
         if address == BGP:
             return self.bgp
+        if address == OBP0:
+            return self.obp0
+        if address == OBP1:
+            return self.obp1
 
         return OPEN_BUS
 
@@ -209,6 +277,12 @@ class PPU:
             return
         if address == BGP:
             self.bgp = value
+            return
+        if address == OBP0:
+            self.obp0 = value
+            return
+        if address == OBP1:
+            self.obp1 = value
             return
 
     def tick(self, cycles: int) -> tuple[Interrupt, ...]:
@@ -270,6 +344,29 @@ class PPU:
             return TILE_DATA_UNSIGNED + index * TILE_SIZE
 
         return TILE_DATA_SIGNED + to_signed8(index) * TILE_SIZE
+
+    @property
+    def _sprite_height(self) -> int:
+        """8 or 16, per `LCDC` bit 2."""
+        return SPRITE_HEIGHT_TALL if get_bit(self.lcdc, _OBJ_SIZE) else SPRITE_HEIGHT
+
+    def sprites_on_line(self, ly: int) -> list[Sprite]:
+        height = self._sprite_height
+        row = ly + SPRITE_Y_OFFSET
+        on_line: list[Sprite] = []
+
+        for offset in range(0, OAM_SIZE, SPRITE_ENTRY_SIZE):
+            y, x, tile, flags = self.oam[offset : offset + SPRITE_ENTRY_SIZE]
+            sprite = Sprite(y, x, tile, flags)
+
+            # check if line is within the vertical space of the sprite
+            if sprite.y <= row < sprite.y + height:
+                on_line.append(sprite)
+
+                if len(on_line) == MAX_SPRITES_PER_LINE:
+                    break
+
+        return on_line
 
     def _render_scanline(self) -> None:
         """Draw line `ly`"""

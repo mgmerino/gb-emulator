@@ -418,6 +418,24 @@ def test_vram_routes_to_the_ppu(bus: Bus, address: int) -> None:
     assert bus.ppu.vram[address - 0x8000] == 0x5A
 
 
+@pytest.mark.parametrize("address", [0xFE00, 0xFE9F])
+def test_oam_routes_to_the_ppu(bus: Bus, address: int) -> None:
+    bus.write(address, 0x42)
+
+    assert bus.read(address) == 0x42
+    assert bus.ppu.oam[address - 0xFE00] == 0x42
+
+
+def test_obp_round_trips(bus: Bus) -> None:
+    bus.write(memory_map.OBP0, 0x1F)
+    bus.write(memory_map.OBP1, 0x42)
+
+    assert bus.read(memory_map.OBP0) == 0x1F
+    assert bus.read(memory_map.OBP1) == 0x42
+    assert bus.ppu.obp0 == 0x1F
+    assert bus.ppu.obp1 == 0x42
+
+
 def test_the_joypad_reports_nothing_pressed(bus: Bus) -> None:
     # Active-low: a 0 in bits 3-0 means the button is held. Falling through to
     # the io array would report all four at once.
