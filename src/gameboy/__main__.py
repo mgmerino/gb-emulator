@@ -13,9 +13,10 @@ from gameboy.cartridge import (
     compute_global_checksum,
     compute_header_checksum,
 )
-from gameboy.cpu import CPU, Registers, UnknownOpcodeError
+from gameboy.cpu import Registers, UnknownOpcodeError
 from gameboy.encoding import Instruction
 from gameboy.instructions import CB_OPCODES, OPCODES
+from gameboy.machine import run
 from gameboy.memory import Bus, MemoryDevice
 
 type Row = tuple[int, int, str]
@@ -145,35 +146,6 @@ def trace_summary(instructions: int, cycles: int, reason: str) -> str:
     read against.
     """
     return f"--- {instructions} instructions, {cycles} T-cycles, {reason} ---"
-
-
-def run(bus: Bus, instructions: int) -> Iterator[tuple[CPU, int, int]]:
-    """Drive the machine, yielding the CPU, the address it fetched from, and
-    what the step cost.
-
-    Both CLI modes go through here, because two loops that tick differently is a
-    bug nobody finds until the PPU is drawing.
-
-    Typed against `Bus` and not `MemoryDevice`: the protocol describes what the
-    CPU needs, which is four ways to move bytes. Driving the machine also means
-    handing the elapsed time to the devices, and that is not the CPU's business
-    — so it is this function, the one that assembles the machine, that has to
-    know what it is holding.
-    """
-    cpu = CPU(bus, Registers.post_boot())
-
-    for _ in range(instructions):
-        # The address has to be captured before stepping, because it moves the
-        # pc. The register state and the cycle count only exist after.
-        address = cpu.registers.pc
-
-        cycles = cpu.step()
-
-        # The instruction has run; now everything else catches up by exactly the
-        # time it took. This is the whole of "instruction-stepped" emulation.
-        bus.tick(cycles)
-
-        yield (cpu, address, cycles)
 
 
 def trace(bus: Bus, instructions: int) -> Iterator[tuple[str, int]]:
