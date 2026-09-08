@@ -461,8 +461,8 @@ VRAM by hand rather than loading a ROM.
 ### 7. Run the real thing, and look at it
 
 ```
-uv run python -m gameboy ~/games/TETRIS.gb --frame 120
-uv run python -m gameboy ~/games/TETRIS.gb --frame 600 --budget 12000000
+uv run python -m gameboy path/to/TETRIS.gb --frame 120
+uv run python -m gameboy path/to/TETRIS.gb --frame 600 --budget 12000000
 ```
 
 Frame 120 is the copyright screen and frame 600 is the title screen. The menu
