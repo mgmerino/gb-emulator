@@ -171,7 +171,11 @@ runs at the rate it claims.
 Roughly 290k instructions/second on CPython 3.12, about 80% of a real DMG.
 
 [`dmg-acid2`](https://github.com/mattcurrie/dmg-acid2) is the video equivalent,
-and it passes: all 23040 pixels match its reference image. It draws one face out
+and it passes: all 23040 pixels match its reference image.
+
+![dmg-acid2 rendered by this emulator](docs/img/dmg-acid2.png)
+
+That face is the whole PPU in one screenshot. It draws one face out
 of background, window and objects, and the sixteen ways it can come out wrong are
 each a named feature — object palette, both flips, 8×16 size and the bit 0 of its
 tile index, the ten-per-line limit, both object priority rules, both tile maps,
