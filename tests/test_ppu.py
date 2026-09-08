@@ -12,13 +12,18 @@ from gameboy.memory_map import (
     LCDC,
     LY,
     LYC,
+    OBP0,
+    OBP1,
     SCX,
     SCY,
     STAT,
+    WX,
+    WY,
 )
 from gameboy.ppu import (
     MAX_SPRITES_PER_LINE,
     PPU,
+    SCANLINE_DOTS,
     SCREEN_HEIGHT,
     SCREEN_WIDTH,
     TILE_DATA_UNSIGNED,
@@ -74,6 +79,10 @@ def test_ppu_constants() -> None:
         (SCX, "scx"),
         (LYC, "lyc"),
         (BGP, "bgp"),
+        (OBP0, "obp0"),
+        (OBP1, "obp1"),
+        (WY, "window_y"),
+        (WX, "window_x"),
     ],
 )
 def test_the_plain_registers_round_trip(ppu: PPU, address: int, attribute: str) -> None:
@@ -1002,3 +1011,263 @@ def test_flag_bit_4_picks_which_object_palette_is_used(flags: int, shade: int) -
     run_dots(ppu, 70224)
 
     assert tuple(line_of(ppu, 0)[0:8]) == (shade,) * 8
+
+
+# --- 12B: the window ----------------------------------------------------------
+
+# Four tiles, every row of each one uniform, so a rendered pixel names its layer:
+#   0 at 0x8000  colour index 0
+#   1 at 0x8010  colour index 3   the background
+#   2 at 0x8020  colour index 1   the window's first cell row
+#   3 at 0x8030  colour index 2   the window's second cell row
+BG_TILE = 1
+WINDOW_TILE_A = 2
+WINDOW_TILE_B = 3
+# LCD on, window map 1, window on, tile data 0x8000, background on map 0.
+LCDC_WINDOW = 0xF1
+
+
+def ppu_with_window(
+    *, window_y: int = 0, window_x: int = 7, lcdc: int = LCDC_WINDOW
+) -> PPU:
+    """A striped background under a window whose two map rows differ.
+
+    The background alternates tile 1 and tile 0 every cell, so `SCX` moving it
+    is visible. The window's map rows are uniform, so a line of it says which
+    row of its map was drawn.
+    """
+    ppu = PPU(lcdc=lcdc, bgp=0xE4, obp0=0xE4)
+    ppu.vram[0x10:0x20] = bytes([0xFF] * 16)
+    ppu.vram[0x20:0x30] = bytes((0xFF, 0x00) * 8)
+    ppu.vram[0x30:0x40] = bytes((0x00, 0xFF) * 8)
+
+    for cell in range(0x400):
+        ppu.vram[0x1800 + cell] = BG_TILE if cell % 2 == 0 else 0
+    ppu.vram[0x1C00:0x1C20] = bytes([WINDOW_TILE_A] * 32)
+    ppu.vram[0x1C20:0x1C40] = bytes([WINDOW_TILE_B] * 32)
+
+    ppu.window_y = window_y
+    ppu.window_x = window_x
+
+    return ppu
+
+
+def test_the_window_covers_the_background_from_wy_down() -> None:
+    ppu = ppu_with_window(window_y=8)
+
+    run_dots(ppu, 70224)
+
+    assert set(line_of(ppu, 7)) == {3, 0}
+    assert set(line_of(ppu, 8)) == {1}
+
+
+def test_the_window_row_comes_from_its_own_counter() -> None:
+    # Map row 0 for the first eight lines, row 1 for the next eight, and rows
+    # 2 upward are blank. Reading LY instead of the counter gives the same
+    # answer here only because WY is 0.
+    ppu = ppu_with_window()
+
+    run_dots(ppu, 70224)
+
+    assert set(line_of(ppu, 7)) == {1}
+    assert set(line_of(ppu, 8)) == {2}
+    assert set(line_of(ppu, 16)) == {0}
+
+
+def test_the_window_resumes_its_own_row_after_being_switched_off() -> None:
+    # Lines 0-7 draw map row 0, then the window is off for lines 8-15. At line
+    # 16 the counter stands at 8, so map row 1 is next. `LY - WY` would be 16
+    # and would draw map row 2, which is blank.
+    ppu = ppu_with_window()
+
+    run_dots(ppu, SCANLINE_DOTS * 8)
+    ppu.lcdc &= ~0x20
+    run_dots(ppu, SCANLINE_DOTS * 8)
+    ppu.lcdc |= 0x20
+    run_dots(ppu, SCANLINE_DOTS)
+
+    assert ppu.window_line == 9
+    assert set(line_of(ppu, 16)) == {2}
+
+
+def test_the_row_inside_the_tile_also_comes_from_the_counter() -> None:
+    # The gap is three lines, not a multiple of eight, so the counter and
+    # `LY - WY` disagree on the row *inside* the tile as well as on the map row.
+    # Tile 4's first row differs from its other seven, which is what makes that
+    # disagreement visible: the other tiles here are uniform top to bottom.
+    ppu = ppu_with_window()
+    ppu.vram[0x40:0x50] = bytes((0xFF, 0x00)) + bytes((0x00, 0xFF)) * 7
+    ppu.vram[0x1C20:0x1C40] = bytes([4] * 32)
+
+    run_dots(ppu, SCANLINE_DOTS * 8)
+    ppu.lcdc &= ~0x20
+    run_dots(ppu, SCANLINE_DOTS * 3)
+    ppu.lcdc |= 0x20
+    run_dots(ppu, SCANLINE_DOTS)
+
+    assert ppu.window_line == 9
+    assert set(line_of(ppu, 11)) == {1}
+
+
+@pytest.mark.parametrize(("window_x", "edge"), [(7, 0), (87, 80), (166, 159)])
+def test_wx_places_the_left_edge_seven_columns_early(window_x: int, edge: int) -> None:
+    ppu = ppu_with_window(window_x=window_x)
+
+    run_dots(ppu, 70224)
+
+    line = line_of(ppu, 0)
+    assert set(line[edge:]) == {1}
+    if edge:
+        assert set(line[:edge]) == {3, 0}
+
+
+def test_wx_past_the_right_edge_draws_nothing() -> None:
+    ppu = ppu_with_window(window_x=167)
+
+    run_dots(ppu, 70224)
+
+    assert set(line_of(ppu, 0)) == {3, 0}
+    assert ppu.window_line == 0
+
+
+def test_wx_below_seven_clips_instead_of_writing_outside_the_line() -> None:
+    # left_edge is -7. Negative indices are legal in Python and would put those
+    # seven pixels at the end of the framebuffer, on line 143.
+    ppu = ppu_with_window(window_x=0)
+
+    run_dots(ppu, 300)  # far enough into line 0 to draw it, and no further
+
+    assert set(line_of(ppu, 0)) == {1}
+    assert set(ppu.framebuffer[-7:]) == {0}
+    assert set(ppu.line_indices[-7:]) == {1}
+
+
+def test_wx_below_seven_hangs_the_window_off_the_edge_rather_than_shifting_it() -> None:
+    # The window's own first cell is different from the rest, so where it lands
+    # says whether the clip moved the drawing or the counting. left_edge is -7,
+    # so screen column 0 shows the window's column 7: the last pixel of that
+    # first cell, and the only one of it still on screen.
+    ppu = ppu_with_window(window_x=0)
+    ppu.vram[0x1C00] = WINDOW_TILE_B
+
+    run_dots(ppu, 300)
+
+    line = line_of(ppu, 0)
+    assert line[0] == 2
+    assert set(line[1:]) == {1}
+
+
+def test_lcdc_bit_5_clear_draws_no_window() -> None:
+    ppu = ppu_with_window(lcdc=LCDC_WINDOW & ~0x20)
+
+    run_dots(ppu, 70224)
+
+    assert set(line_of(ppu, 0)) == {3, 0}
+    assert ppu.window_line == 0
+
+
+def test_lcdc_bit_0_clear_draws_no_window_even_with_bit_5_set() -> None:
+    # Bit 0 is "BG and window enable" on a DMG: it blanks both layers together.
+    ppu = ppu_with_window(lcdc=LCDC_WINDOW & ~0x01)
+
+    run_dots(ppu, 70224)
+
+    assert set(line_of(ppu, 0)) == {0}
+    assert ppu.window_line == 0
+
+
+def test_lcdc_bit_6_selects_the_window_tile_map() -> None:
+    # Clearing bit 6 sends the window to map 0, which is the background's own,
+    # so it draws the same tiles. SCX is what tells the two layers apart: the
+    # background is shifted by it and the window is not.
+    on_map_1 = ppu_with_window()
+    on_map_0 = ppu_with_window(lcdc=LCDC_WINDOW & ~0x40)
+    on_map_0.scx = 4
+    no_window = ppu_with_window(lcdc=LCDC_WINDOW & ~0x20)
+    no_window.scx = 4
+
+    for ppu in (on_map_1, on_map_0, no_window):
+        run_dots(ppu, 70224)
+
+    assert set(line_of(on_map_1, 0)) == {1}
+    assert set(line_of(on_map_0, 0)) == {3, 0}
+    assert line_of(on_map_0, 0) != line_of(no_window, 0)
+
+
+def test_scx_and_scy_move_the_background_and_leave_the_window_alone() -> None:
+    still = ppu_with_window(window_x=87)
+    scrolled = ppu_with_window(window_x=87)
+    scrolled.scx = 4
+    scrolled.scy = 4
+
+    run_dots(still, 70224)
+    run_dots(scrolled, 70224)
+
+    assert line_of(still, 0)[:80] != line_of(scrolled, 0)[:80]
+    assert line_of(still, 0)[80:] == line_of(scrolled, 0)[80:]
+
+
+def test_the_window_counter_advances_once_per_drawn_line() -> None:
+    ppu = ppu_with_window()
+
+    run_dots(ppu, SCANLINE_DOTS * 3)
+
+    assert ppu.window_line == 3
+
+
+def test_the_window_counter_pauses_while_the_window_is_off_and_then_resumes() -> None:
+    # The reason the counter exists. `LY - WY` would have reached 6 by the end.
+    ppu = ppu_with_window()
+
+    run_dots(ppu, SCANLINE_DOTS * 2)
+    assert ppu.window_line == 2
+
+    ppu.lcdc &= ~0x20
+    run_dots(ppu, SCANLINE_DOTS * 3)
+    assert ppu.window_line == 2
+
+    ppu.lcdc |= 0x20
+    run_dots(ppu, SCANLINE_DOTS)
+
+    assert ppu.window_line == 3
+
+
+def test_the_window_counter_starts_each_frame_at_zero() -> None:
+    ppu = ppu_with_window()
+
+    run_dots(ppu, 70224)
+    assert ppu.window_line == 0
+
+    run_dots(ppu, SCANLINE_DOTS * 2)
+
+    assert ppu.window_line == 2
+
+
+def test_switching_the_lcd_off_resets_the_window_counter() -> None:
+    ppu = ppu_with_window()
+    run_dots(ppu, SCANLINE_DOTS * 5)
+    assert ppu.window_line == 5
+
+    ppu.write(LCDC, ppu.lcdc & ~0x80)
+
+    assert ppu.window_line == 0
+
+
+def test_an_object_behind_a_non_empty_window_pixel_stays_hidden() -> None:
+    ppu = ppu_with_window(lcdc=LCDC_WINDOW | 0x02)
+    ppu.oam[0:4] = bytes((16, 8, WINDOW_TILE_B, 0x80))  # screen (0, 0)
+
+    run_dots(ppu, 70224)
+
+    assert set(line_of(ppu, 0)[0:8]) == {1}
+
+
+def test_an_object_behind_a_window_pixel_of_index_0_shows_through() -> None:
+    # Window map rows 2 upward are blank, so from screen line 16 the window's
+    # colour index is 0 and a behind-the-background object is not hidden.
+    ppu = ppu_with_window(lcdc=LCDC_WINDOW | 0x02)
+    ppu.oam[0:4] = bytes((32, 8, WINDOW_TILE_B, 0x80))  # screen (0, 16)
+
+    run_dots(ppu, 70224)
+
+    assert set(line_of(ppu, 16)[0:8]) == {2}

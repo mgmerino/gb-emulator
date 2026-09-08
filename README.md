@@ -27,6 +27,7 @@ tour:
 | 11A | [The PPU as a clock: modes, LCD registers, interrupts](docs/STEP_11A.md) | done |
 | 11B | [The PPU as a renderer: tiles, maps, scrolling](docs/STEP_11B.md) | done |
 | 12A | [Objects: OAM, the DMA, priority and flips](docs/STEP_12A.md) | done |
+| 12B | [The window, and its internal line counter](docs/STEP_12B.md) | done |
 
 ## Requirements
 
@@ -169,6 +170,22 @@ runs at the rate it claims.
 
 Roughly 290k instructions/second on CPython 3.12, about 80% of a real DMG.
 
+[`dmg-acid2`](https://github.com/mattcurrie/dmg-acid2) is the video equivalent,
+and it passes: all 23040 pixels match its reference image.
+
+![dmg-acid2 rendered by this emulator](docs/img/dmg-acid2.png)
+
+That face is the whole PPU in one screenshot. It draws one face out
+of background, window and objects, and the sixteen ways it can come out wrong are
+each a named feature — object palette, both flips, 8×16 size and the bit 0 of its
+tile index, the ten-per-line limit, both object priority rules, both tile maps,
+tile data selection, window enable, and the window's internal line counter. It
+reaches the face at frame 10.
+
+```
+uv run python -m gameboy path/to/dmg-acid2.gb --frame 10 --budget 3000000
+```
+
 Two things do not work yet:
 
 - **the combined `cpu_instrs.gb`**, 64 KiB behind an MBC1. The bus maps bank 1 as
@@ -181,16 +198,16 @@ Two things do not work yet:
 ## The PPU
 
 The PPU counts dots, walks the four modes, reports its position through the LCD
-registers, raises `VBlank` and `LCD_STAT`, and draws the background: 160×144
-bytes, one per pixel, each of them a shade `0`–`3`.
+registers, raises `VBlank` and `LCD_STAT`, and draws all three layers —
+background, window and objects — into 160×144 bytes, one per pixel, each of them
+a shade `0`–`3`.
 
 What a shade looks like is not the core's business. `PLAN.md` constraint 1 says
 the core exposes a framebuffer and nothing else, so the same 23040 bytes become
 a character ramp in the terminal, a PGM through `--out`, or a PNG in
 `experiments/`, purely by changing the four-entry table they index.
 
-The renderer this is being built towards is a **scanline renderer**, not a dot
-renderer. The hardware produces one pixel per dot through a fetcher and an
+The renderer is a **scanline renderer**, not a dot renderer. The hardware produces one pixel per dot through a fetcher and an
 8-pixel FIFO; this project instead computes a whole line at once, at the end of
 mode 3, from whatever the registers say at that instant. That is a deliberate
 trade, not an omission:
@@ -207,16 +224,14 @@ game to measure against.
 
 Also not modelled, and listed at the top of `ppu.py` with the reason for each:
 VRAM and OAM blocking during mode 3, the variable length of mode 3, the pixel
-FIFO, the `LY == 153` quirk, and the OAM DMA's 640 dots.
+FIFO, the `LY == 153` quirk, the OAM DMA's 640 dots, `WX` below 7, and the
+`WY == LY` latch.
 
 ## What is missing
 
-Tetris boots and draws its title screen, cursor included: the background from
-Step 11B, and the `1PLAYER` arrow from Step 12A, which is OAM entry 0 pushed
-across by the DMA once a frame.
-
-**The window.** The third layer is still missing, so `LCDC` bits 6 and 5 are
-stored and ignored on purpose, along with `WY` and `WX`. That is Step 12B.
+The DMG's video hardware is done: every bit of `LCDC` does what it says, and
+`dmg-acid2` matches its reference image pixel for pixel. What is left is
+everything around it.
 
 **The joypad.** `0xFF00` answers "no button pressed" and nothing more, which is
 a stub and not an implementation. It exists because the register is active-low:

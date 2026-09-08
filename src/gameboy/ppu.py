@@ -16,6 +16,8 @@ from gameboy.memory_map import (
     SCY,
     STAT,
     VRAM,
+    WX,
+    WY,
 )
 
 # Not modelled in this class:
@@ -23,7 +25,12 @@ from gameboy.memory_map import (
 # - The variable length of mode 3.
 # - The pixel FIFO.
 # - The `LY == 153` quirk.
-# - The window.
+# - `WX` below 7. On hardware those are a nest of special cases and no game
+#   depends on them; here the left edge is `WX - 7` and anything negative is
+#   clipped.
+# - The `WY == LY` latch. The hardware compares the two on every line of the
+#   frame and remembers the answer; this compares `LY >= WY` per line, which
+#   differs only for a `WY` written mid-frame to a line already passed.
 # - The OAM DMA's timing. The transfer lives on the bus and happens in one pass;
 #   the hardware takes 640 dots over it and locks the CPU out of everything but
 #   HRAM while it runs, which is why games call it from a routine copied there.
@@ -107,6 +114,9 @@ OAM_SCAN_DOTS: Final = 80
 DRAWING_DOTS: Final = 172
 SPRITE_X_OFFSET: Final = 8
 SPRITE_Y_OFFSET: Final = 16
+# The window's own offset. This one comes from the fetcher running three steps ahead of
+# the pixel it pushes, so WX = 7 is the left edge of the screen.
+WINDOW_X_OFFSET: Final = 7
 # The offsets above are the largest object in each axis, which is why the Y one
 # and the tall height below are the same number.
 SPRITE_HEIGHT: Final = 8
@@ -131,6 +141,10 @@ _BG_ENABLE: Final = 0  # LCDC bit 0. Clear means the background is not drawn at 
 _BG_TILE_MAP: Final = 3  # LCDC bit 3. Set means map 1 (0x9C00), clear means map 0.
 _OBJ_SIZE: Final = 2  # LCDC bit 2. Set means every object is 8x16, not 8x8.
 _OBJ_ENABLE: Final = 1  # LCDC bit 1. Clear means no objects are drawn.
+# Window
+_WINDOW_ENABLE: Final = 5
+_WINDOW_TILE_MAP: Final = 6
+# Sprite
 # Priority: 0 = No, 1 = BG and Window color indices 1–3 are drawn over this OBJ
 _SPRITE_PRIORITY: Final = 7
 _SPRITE_Y_FLIP: Final = 6
@@ -231,6 +245,11 @@ class PPU:
     oam: bytearray = field(default_factory=lambda: bytearray(OAM_SIZE))
     obp0: int = 0
     obp1: int = 0
+    window_y: int = 0
+    window_x: int = 0
+    # The window's own row counter: it only advances on the lines where the window was
+    # actually drawn. Lives for one frame.
+    window_line: int = 0
 
     @classmethod
     def post_boot(cls) -> Self:
@@ -259,6 +278,10 @@ class PPU:
             return self.obp0
         if address == OBP1:
             return self.obp1
+        if address == WY:
+            return self.window_y
+        if address == WX:
+            return self.window_x
 
         return OPEN_BUS
 
@@ -291,6 +314,12 @@ class PPU:
         if address == OBP1:
             self.obp1 = value
             return
+        if address == WY:
+            self.window_y = value
+            return
+        if address == WX:
+            self.window_x = value
+            return
 
     def tick(self, cycles: int) -> tuple[Interrupt, ...]:
         """Advance the PPU by `cycles` dots. Returns the interrupts to request."""
@@ -320,6 +349,10 @@ class PPU:
         if self.mode is Mode.VBLANK and previous_mode is not Mode.VBLANK:
             interrupts = (Interrupt.VBLANK,)
             self.frames += 1
+            # The window counter's life is one frame, and this edge is where a
+            # frame ends. Reset it here, not at `window_y`: WY decides when
+            # drawing starts, the counter decides which row gets drawn.
+            self.window_line = 0
 
         # The third consumer of `previous_mode`: the line is drawn once, on the
         # edge into HBlank. `ly < SCREEN_HEIGHT` is true whenever mode 0 is, but
@@ -385,11 +418,46 @@ class PPU:
         return on_line
 
     def _render_scanline(self) -> None:
-        """Draw line `ly`: the background first, then the objects over it."""
+        """Draw line `ly`: background, then window over it, then objects on top."""
         start = self.ly * SCREEN_WIDTH
 
         self._render_background_line(start)
+        self._render_window_line(start)
         self._render_objects_line(start)
+
+    def _render_window_line(self, start: int) -> None:
+        # Bit 0 blanks the background and the window together on a DMG, so bit 5
+        # on its own draws nothing.
+        if not (get_bit(self.lcdc, _BG_ENABLE) and get_bit(self.lcdc, _WINDOW_ENABLE)):
+            return
+
+        # The window has no bottom edge: once it starts it runs to line 143.
+        if self.ly < self.window_y:
+            return
+
+        left_edge = self.window_x - WINDOW_X_OFFSET
+        if left_edge >= SCREEN_WIDTH:
+            return
+
+        # The row comes from the window's own counter
+        map_row = self.window_line // 8  # which row of CELLS
+        row_in_tile = self.window_line % 8  # which row of PIXELS inside a cell
+
+        map_base = TILE_MAP_1 if get_bit(self.lcdc, _WINDOW_TILE_MAP) else TILE_MAP_0
+        map_offset = map_base - VRAM.start + map_row * TILE_MAP_WIDTH
+
+        # `left_edge` is negative when WX < 7, and then the window's own first columns
+        # fall off the screen.
+        for column in range(max(0, left_edge), SCREEN_WIDTH):
+            window_column = column - left_edge
+            tile_index = self.vram[map_offset + window_column // 8]
+            index = self.tile_row(tile_index, row_in_tile)[window_column % 8]
+
+            self.line_indices[column] = index
+            self.framebuffer[start + column] = (self.bgp >> (index * 2)) & 0b11
+
+        # Once per line actually drawn.
+        self.window_line += 1
 
     def _render_background_line(self, start: int) -> None:
         """Draw line `ly` of the background into the framebuffer."""
@@ -522,6 +590,7 @@ class PPU:
         self.mode = Mode.HBLANK
         self.last_stat_line = False
         self.framebuffer[:] = bytes(len(self.framebuffer))
+        self.window_line = 0
 
 
 def decode_row_index(low: int, high: int) -> tuple[int, ...]:
