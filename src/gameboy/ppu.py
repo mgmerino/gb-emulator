@@ -25,7 +25,12 @@ from gameboy.memory_map import (
 # - The variable length of mode 3.
 # - The pixel FIFO.
 # - The `LY == 153` quirk.
-# - The window.
+# - `WX` below 7. On hardware those are a nest of special cases and no game
+#   depends on them; here the left edge is `WX - 7` and anything negative is
+#   clipped.
+# - The `WY == LY` latch. The hardware compares the two on every line of the
+#   frame and remembers the answer; this compares `LY >= WY` per line, which
+#   differs only for a `WY` written mid-frame to a line already passed.
 # - The OAM DMA's timing. The transfer lives on the bus and happens in one pass;
 #   the hardware takes 640 dots over it and locks the CPU out of everything but
 #   HRAM while it runs, which is why games call it from a routine copied there.
