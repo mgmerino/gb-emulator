@@ -65,7 +65,8 @@ something you can run and observe**, never in "trust me, we'll use this later".
 | 11B | PPU as a renderer: tiles, background map, scrolling | Dump a rendered frame as a PNG/PPM |
 | 12A | PPU: objects, OAM and the DMA | Tetris's menu cursor appears |
 | 12B | PPU: the window, and the three layers composed | dmg-acid2 draws its face |
-| 13 | Screen output & frame pacing | See Nintendo's boot logo scroll down, at the right speed |
+| 13A | Screen output: a window, and the loop turned around | Watch Tetris move, and measure how slowly |
+| 13B | Real time: profile, optimise, then pace the frames | The same ROM at 59.7 fps |
 | 14 | Joypad | Play something |
 | 15 | MBC1/MBC3, external RAM, battery saves | Load real, bigger games and keep save files |
 | 16 | Debug tooling: disassembler, tracer, breakpoints | Diff your execution trace against a reference emulator |
