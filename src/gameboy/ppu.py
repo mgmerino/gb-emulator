@@ -16,6 +16,8 @@ from gameboy.memory_map import (
     SCY,
     STAT,
     VRAM,
+    WX,
+    WY,
 )
 
 # Not modelled in this class:
@@ -131,6 +133,10 @@ _BG_ENABLE: Final = 0  # LCDC bit 0. Clear means the background is not drawn at 
 _BG_TILE_MAP: Final = 3  # LCDC bit 3. Set means map 1 (0x9C00), clear means map 0.
 _OBJ_SIZE: Final = 2  # LCDC bit 2. Set means every object is 8x16, not 8x8.
 _OBJ_ENABLE: Final = 1  # LCDC bit 1. Clear means no objects are drawn.
+# Window
+_WINDOW_ENABLE: Final = 5
+_WINDOW_TILE_MAP: Final = 6
+# Sprite
 # Priority: 0 = No, 1 = BG and Window color indices 1–3 are drawn over this OBJ
 _SPRITE_PRIORITY: Final = 7
 _SPRITE_Y_FLIP: Final = 6
@@ -231,6 +237,8 @@ class PPU:
     oam: bytearray = field(default_factory=lambda: bytearray(OAM_SIZE))
     obp0: int = 0
     obp1: int = 0
+    window_y: int = 0
+    window_x: int = 0
 
     @classmethod
     def post_boot(cls) -> Self:
@@ -259,6 +267,10 @@ class PPU:
             return self.obp0
         if address == OBP1:
             return self.obp1
+        if address == WY:
+            return self.window_y
+        if address == WX:
+            return self.window_x
 
         return OPEN_BUS
 
@@ -290,6 +302,12 @@ class PPU:
             return
         if address == OBP1:
             self.obp1 = value
+            return
+        if address == WY:
+            self.window_y = value
+            return
+        if address == WX:
+            self.window_x = value
             return
 
     def tick(self, cycles: int) -> tuple[Interrupt, ...]:

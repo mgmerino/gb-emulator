@@ -436,6 +436,29 @@ def test_obp_round_trips(bus: Bus) -> None:
     assert bus.ppu.obp1 == 0x42
 
 
+def test_the_window_registers_route_to_the_ppu(bus: Bus) -> None:
+    bus.write(memory_map.WY, 0x40)
+    bus.write(memory_map.WX, 0x07)
+
+    assert bus.read(memory_map.WY) == 0x40
+    assert bus.read(memory_map.WX) == 0x07
+    assert bus.ppu.window_y == 0x40
+    assert bus.ppu.window_x == 0x07
+
+
+def test_the_ppu_register_range_stops_at_wx(bus: Bus) -> None:
+    # 0xFF4B is the last DMG video register, so 0xFF4C belongs to nobody and
+    # keeps falling through to the io array. Widening the range past WX would
+    # hand it to a PPU that has no field for it.
+    assert memory_map.WX in memory_map.PPU_REGISTERS_2
+    assert memory_map.WX + 1 not in memory_map.PPU_REGISTERS_2
+
+    bus.write(memory_map.WX + 1, 0x5A)
+
+    assert bus.read(memory_map.WX + 1) == 0x5A
+    assert bus.ppu.read(memory_map.WX + 1) == memory_map.OPEN_BUS
+
+
 def test_the_dma_copies_a_page_of_wram_into_oam(bus: Bus) -> None:
     bus.write(0xC000, 0x42)
     bus.write(0xC09F, 0x99)

@@ -12,9 +12,13 @@ from gameboy.memory_map import (
     LCDC,
     LY,
     LYC,
+    OBP0,
+    OBP1,
     SCX,
     SCY,
     STAT,
+    WX,
+    WY,
 )
 from gameboy.ppu import (
     MAX_SPRITES_PER_LINE,
@@ -74,6 +78,10 @@ def test_ppu_constants() -> None:
         (SCX, "scx"),
         (LYC, "lyc"),
         (BGP, "bgp"),
+        (OBP0, "obp0"),
+        (OBP1, "obp1"),
+        (WY, "window_y"),
+        (WX, "window_x"),
     ],
 )
 def test_the_plain_registers_round_trip(ppu: PPU, address: int, attribute: str) -> None:
