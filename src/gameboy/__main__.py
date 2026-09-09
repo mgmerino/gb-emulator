@@ -16,6 +16,7 @@ from gameboy.cartridge import (
 from gameboy.cpu import CPU, Registers, UnknownOpcodeError
 from gameboy.encoding import Instruction
 from gameboy.instructions import CB_OPCODES, OPCODES
+from gameboy.machine import FRAME_CYCLES, run, run_frame
 from gameboy.memory import Bus, MemoryDevice
 
 type Row = tuple[int, int, str]
@@ -147,35 +148,6 @@ def trace_summary(instructions: int, cycles: int, reason: str) -> str:
     return f"--- {instructions} instructions, {cycles} T-cycles, {reason} ---"
 
 
-def run(bus: Bus, instructions: int) -> Iterator[tuple[CPU, int, int]]:
-    """Drive the machine, yielding the CPU, the address it fetched from, and
-    what the step cost.
-
-    Both CLI modes go through here, because two loops that tick differently is a
-    bug nobody finds until the PPU is drawing.
-
-    Typed against `Bus` and not `MemoryDevice`: the protocol describes what the
-    CPU needs, which is four ways to move bytes. Driving the machine also means
-    handing the elapsed time to the devices, and that is not the CPU's business
-    — so it is this function, the one that assembles the machine, that has to
-    know what it is holding.
-    """
-    cpu = CPU(bus, Registers.post_boot())
-
-    for _ in range(instructions):
-        # The address has to be captured before stepping, because it moves the
-        # pc. The register state and the cycle count only exist after.
-        address = cpu.registers.pc
-
-        cycles = cpu.step()
-
-        # The instruction has run; now everything else catches up by exactly the
-        # time it took. This is the whole of "instruction-stepped" emulation.
-        bus.tick(cycles)
-
-        yield (cpu, address, cycles)
-
-
 def trace(bus: Bus, instructions: int) -> Iterator[tuple[str, int]]:
     """Run the machine, yielding a formatted line and its cost.
 
@@ -228,20 +200,13 @@ def frame_as_pgm(frame: memoryview) -> bytes:
     return header + bytes(SHADE_GREY[shade] for shade in frame)
 
 
-def render_frames(bus: Bus, frames: int, instructions: int) -> tuple[bool, int]:
-    """Run until `frames` have completed. Returns whether it got there, and the
-    instruction count.
+def render_frames(cpu: CPU, bus: Bus, frames: int, budget: int) -> bool:
+    """Run until `frames` frames have been drawn. Says whether they all were.
 
-    The instruction budget is what stops a ROM that never reaches VBlank from
-    hanging the CLI.
+    The same guard the window needs, through the same function: a frame that is
+    not coming has to stop the CLI too.
     """
-    executed = 0
-    for _cpu, _address, _cycles in run(bus, instructions):
-        executed += 1
-        if bus.ppu.frames >= frames:
-            return True, executed
-
-    return False, executed
+    return all(run_frame(cpu, bus, budget) for _ in range(frames))
 
 
 def main() -> int:
@@ -273,8 +238,8 @@ def main() -> int:
     parser.add_argument(
         "--budget",
         type=int,
-        default=5_000_000,
-        help="with --frame, the instruction limit before giving up",
+        default=FRAME_CYCLES * 4,
+        help="with --frame, the T-cycles to spend on one frame before giving up",
     )
     args = parser.parse_args()
 
@@ -340,18 +305,19 @@ def main() -> int:
         return exit_code
     elif args.frame is not None:
         bus = Bus.post_boot(cartridge)
-        reached, executed = render_frames(bus, args.frame, args.budget)
+        cpu = CPU(bus, Registers.post_boot())
 
-        if not reached:
+        if not render_frames(cpu, bus, args.frame, args.budget):
             print(
-                f"gameboy: only {bus.ppu.frames} frames in {executed} instructions",
+                f"gameboy: drew {bus.ppu.frames} frames, then spent "
+                f"{args.budget} T-cycles on one that never came",
                 file=sys.stderr,
             )
             return 1
 
         if args.out is not None:
             args.out.write_bytes(frame_as_pgm(bus.ppu.frame))
-            print(f"wrote {args.out} after {executed} instructions")
+            print(f"wrote {args.out} after {bus.ppu.frames} frames")
         else:
             print(frame_as_text(bus.ppu.frame))
     else:
