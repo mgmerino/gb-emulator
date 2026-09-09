@@ -20,6 +20,7 @@ class PygameDisplay:
 
     _scale: int
     _screen: Surface
+    _title: str
 
     def __init__(self, scale: int = 3, title: str = "gameboy") -> None:
         # The window is the scaled size and `present` does the scaling, rather
@@ -34,6 +35,8 @@ class PygameDisplay:
         self._screen = pygame.display.set_mode(
             (SCREEN_WIDTH * scale, SCREEN_HEIGHT * scale)
         )
+        self._title = title
+
         pygame.display.set_caption(title)
 
     def present(self, frame: memoryview) -> None:
@@ -66,3 +69,7 @@ class PygameDisplay:
                 should_close = True
 
         return should_close
+
+    def show_rate(self, rate: float) -> None:
+        """Put the frame rate where a window can show it for free."""
+        pygame.display.set_caption(f"{self._title} - {rate:.1f} fps")

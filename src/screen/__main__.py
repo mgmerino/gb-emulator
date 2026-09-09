@@ -7,8 +7,8 @@ from gameboy.cartridge import Cartridge, InvalidCartridgeError
 from gameboy.cpu import CPU, Registers
 from gameboy.machine import FRAME_CYCLES
 from gameboy.memory import Bus
-from screen.pygame_display import PygameDisplay
 from screen.loop import run
+from screen.pygame_display import PygameDisplay
 
 
 def main() -> int:
@@ -27,22 +27,28 @@ def main() -> int:
     )
     args = parser.parse_args()
 
-    # HOLE 6 — load the cartridge.
-    #
-    # `gameboy/__main__.py` already does this, including the two failures worth
-    # catching by hand: `FileNotFoundError` and `InvalidCartridgeError`. Copy
-    # the shape, print with this prog's name, return 1. Six duplicated lines is
-    # cheaper than a shared helper that both CLIs have to agree on, but if you
-    # disagree, that is a fair place to extract one.
+    try:
+        cartridge = Cartridge.from_path(args.rom)
+    except FileNotFoundError:
+        print(f"screen: no such file: {args.rom}")
+        return 1
+    except InvalidCartridgeError as error:
+        print(f"screen: {args.rom} is not a valid cartridge: {error}")
+        return 1
 
-    # HOLE 7 — assemble the machine and hand it to the loop.
-    #
-    # `Bus.post_boot(cartridge)` and one CPU, built here and alive for the
-    # whole run. That is the object `run_frame` refuses to build for itself.
-    #
-    # Then the display, then `run(...)`, then the last number: the doc wants it
-    # printed on exit as well as shown live, because 13B needs a before and an
-    # after to paste somewhere.
+    bus = Bus.post_boot(cartridge)
+    # One CPU for the whole run. `run_frame` takes it rather than building its
+    # own precisely so that this line happens once and not sixty times a second.
+    cpu = CPU(bus, Registers.post_boot())
+    # Homebrew and test ROMs often leave the header title blank.
+    title = cartridge.header.title or args.rom.stem
+    display = PygameDisplay(scale=args.scale, title=title)
+
+    rate = run(display, cpu, bus, args.budget)
+
+    # The live number is gone with the window, and 13B needs a before and an
+    # after it can paste somewhere.
+    print(f"{rate.per_second:.1f} frames per second")
 
     return 0
 
