@@ -220,10 +220,10 @@ changed.
 The core needs a way to be told which buttons are held. There are two shapes:
 
 ```python
-bus.press(Button.A)                     # one event at a time
+bus.press(Button.A)  # one event at a time
 bus.release(Button.A)
 
-bus.hold(frozenset({Button.A, ...}))    # the whole state, once per frame
+bus.hold(frozenset({Button.A, ...}))  # the whole state, once per frame
 ```
 
 The second shape is a better fit for section 5. The frontend sends the whole
