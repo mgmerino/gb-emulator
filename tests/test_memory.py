@@ -505,7 +505,7 @@ def test_the_dma_register_is_not_one_of_the_ppus(bus: Bus) -> None:
 def test_the_joypad_reports_nothing_pressed(bus: Bus) -> None:
     # Active-low: a 0 in bits 3-0 means the button is held. Falling through to
     # the io array would report all four at once.
-    bus.write(JOYPAD, 0x20)  # select the action buttons
+    bus.write(JOYPAD, 0x20)  # select the direction pad
 
     assert bus.read(JOYPAD) & 0x0F == 0x0F
 
