@@ -1,7 +1,7 @@
 from dataclasses import dataclass, field
 from enum import IntEnum
 
-# #    0xFF00  P1 / JOYP
+#      0xFF00  P1 / JOYP
 # ┌─────┬─────┬─────────┬─────────┬───────┬────────┬──────┬───────┐
 # │  7  │  6  │    5    │    4    │   3   │   2    │  1   │   0   │
 # ├─────┴─────┼─────────┼─────────┼───────┼────────┼──────┼───────┤
@@ -10,30 +10,24 @@ from enum import IntEnum
 # └───────────┴─────────┴─────────┴───────┴────────┴──────┴───────┘
 #               written by the CPU   read-only: 0 means pressed
 
-# Button encodes the bits 5-4 and 3-0 as hex values:
-# | BIN  | HEX |
-# |------|-----|
-# |010111| 17  |
-# |011011| 1B  |
-# |011101| 1D  |
-# |011110| 1E  |
-# |100111| 27  |
-# |101011| 2B  |
-# |101101| 2D  |
-# |101110| 2E  |
-
 GROUP_BIT_MASK = 0x30
 BUTTON_BIT_MASK = 0x0F
 
 class Button(IntEnum):
-    START = 0x17
-    SELECT = 0x1B
-    B = 0x1D
-    A = 0x1E
-    DOWN = 0x27
-    UP = 0x2B
-    LEFT = 0x2D
-    RIGHT = 0x2E
+    """Each value is bits 5-0 of what P1 reads when that button is the only one
+    held and its group is selected. Active-low, like the register: the 0 in
+    bits 5-4 is the select line that reaches the button, and the 0 in bits 3-0
+    is the line it pulls down.
+    """
+
+    START = 0b01_0111
+    SELECT = 0b01_1011
+    B = 0b01_1101
+    A = 0b01_1110
+    DOWN = 0b10_0111
+    UP = 0b10_1011
+    LEFT = 0b10_1101
+    RIGHT = 0b10_1110
 
 
 @dataclass(slots=True)
