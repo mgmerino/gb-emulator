@@ -10,7 +10,8 @@ from gameboy.joypad import Button, Joypad
         (0x20, 0xED),
         (0x10, 0xDE),
         (0x30, 0xFF),
-        (0x00, 0xCC)
+        (0x00, 0xCC),
+        (0x2F, 0xED),  # bits 3-0 are the buttons' lines, not the CPU's
     ],
 )
 def test_held_button_read_selected_group(written: int, expected: int) -> None:
