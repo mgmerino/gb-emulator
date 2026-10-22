@@ -2,6 +2,7 @@ import pytest
 from conftest import FakeCartridge
 
 from gameboy import memory_map
+from gameboy.joypad import Button
 from gameboy.memory import Bus
 from gameboy.memory_map import (
     BGP,
@@ -505,7 +506,7 @@ def test_the_dma_register_is_not_one_of_the_ppus(bus: Bus) -> None:
 def test_the_joypad_reports_nothing_pressed(bus: Bus) -> None:
     # Active-low: a 0 in bits 3-0 means the button is held. Falling through to
     # the io array would report all four at once.
-    bus.write(JOYPAD, 0x20)  # select the action buttons
+    bus.write(JOYPAD, 0x20)  # select the direction pad
 
     assert bus.read(JOYPAD) & 0x0F == 0x0F
 
@@ -520,3 +521,10 @@ def test_the_joypad_top_bits_are_unwired(bus: Bus) -> None:
     bus.write(JOYPAD, 0x00)
 
     assert bus.read(JOYPAD) & 0xC0 == 0xC0
+
+
+def test_joypad_reads_through_the_bus(bus: Bus) -> None:
+    bus.joypad.held.add(Button.LEFT)
+    bus.write(JOYPAD, 0x20)
+
+    assert bus.read(JOYPAD) == 0xED

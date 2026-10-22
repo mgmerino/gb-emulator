@@ -8,6 +8,7 @@ from typing import Protocol, Self, final
 
 from gameboy import bits, interrupts, memory_map
 from gameboy.interrupts import Interrupt, request
+from gameboy.joypad import Joypad
 from gameboy.ppu import PPU
 from gameboy.serial import Serial
 from gameboy.timer import Timer
@@ -31,9 +32,10 @@ class Bus:
         self.i_flag = 0
         self.timer = timer
         self.ppu = ppu
-        # Constructed rather than injected: unlike the timer, the serial port
-        # has no post-boot state a caller could want to choose.
+        # Constructed rather than injected: unlike the timer and PPU, the serial port
+        # and the joypad have no post-boot state a caller could want to choose.
         self.serial = Serial()
+        self.joypad = Joypad()
 
     @classmethod
     def post_boot(cls, cartridge: MemoryDevice) -> Self:
@@ -58,12 +60,7 @@ class Bus:
             case _ if masked_address in memory_map.TIMER_REGISTERS:
                 return self.timer.read(masked_address)
             case memory_map.JOYPAD:
-                # stub buttons as released:
-                stored = self.io[masked_address - memory_map.IO.start]
-
-                return (
-                    stored & memory_map.JOYPAD_SELECT
-                ) | memory_map.JOYPAD_NONE_PRESSED
+                return self.joypad.read(masked_address)
             case _ if masked_address in memory_map.SERIAL_REGISTERS:
                 return self.serial.read(masked_address)
             case _ if (
@@ -108,6 +105,8 @@ class Bus:
                     request(self, Interrupt.TIMER)
             case _ if masked_address in memory_map.SERIAL_REGISTERS:
                 self.serial.write(masked_address, masked_value)
+            case memory_map.JOYPAD:
+                self.joypad.write(masked_address, masked_value)
             case _ if (
                 masked_address in memory_map.PPU_REGISTERS_1
                 or masked_address in memory_map.PPU_REGISTERS_2
