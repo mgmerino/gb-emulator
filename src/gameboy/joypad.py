@@ -1,5 +1,6 @@
 from dataclasses import dataclass, field
 from enum import IntEnum
+from typing import Final
 
 #      0xFF00  P1 / JOYP
 # ┌─────┬─────┬─────────┬─────────┬───────┬────────┬──────┬───────┐
@@ -10,8 +11,10 @@ from enum import IntEnum
 # └───────────┴─────────┴─────────┴───────┴────────┴──────┴───────┘
 #               written by the CPU   read-only: 0 means pressed
 
-GROUP_BIT_MASK = 0x30
-BUTTON_BIT_MASK = 0x0F
+_UNWIRED: Final = 0xC0
+_SELECT_LINES: Final = 0x30
+_BUTTON_LINES: Final = 0x0F
+
 
 class Button(IntEnum):
     """Each value is bits 5-0 of what P1 reads when that button is the only one
@@ -36,20 +39,22 @@ class Joypad:
     held: set[Button] = field(default_factory=set)
 
     def read(self, address: int) -> int:
-        low_nibble = 0x0F
+        low_nibble = _BUTTON_LINES
 
         for button in self.held:
-            # check if button's current group is selected
-            group_bit = GROUP_BIT_MASK ^ (button & GROUP_BIT_MASK)
-            selected = self.select & group_bit == 0
+            # The button's select line is the 0 in its bits 5-4. Flipping them
+            # inside the mask turns that 0 into a bit to test `select` with.
+            group_bit = _SELECT_LINES ^ (button & _SELECT_LINES)
+            selected = (self.select & group_bit) == 0
 
-            # compute the bit that goes down in the nibble
             if selected:
-                button_bit = button & BUTTON_BIT_MASK
-                mask = BUTTON_BIT_MASK ^ button_bit
-                low_nibble &= ~mask
+                # Same flip on bits 3-0: the 0 in the pattern becomes the one
+                # bit this button pulls down.
+                pattern = button & _BUTTON_LINES
+                bit = _BUTTON_LINES ^ pattern
+                low_nibble &= ~bit
 
-        return 0xC0 | self.select | low_nibble
+        return _UNWIRED | self.select | low_nibble
 
     def write(self, address: int, value: int) -> None:
-        self.select = value & 0x30
+        self.select = value & _SELECT_LINES
