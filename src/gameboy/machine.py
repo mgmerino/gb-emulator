@@ -13,6 +13,7 @@ from gameboy.ppu import LINES_PER_FRAME, SCANLINE_DOTS
 
 # One DMG frame in T-cycles: 154 scanlines of 456 dots.
 FRAME_CYCLES: Final = LINES_PER_FRAME * SCANLINE_DOTS
+CLOCK_HZ: Final = 4_194_304
 
 
 def step(cpu: CPU, bus: Bus) -> int:
