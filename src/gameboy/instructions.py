@@ -1072,10 +1072,13 @@ def _halt(cpu: CPU) -> None:
         cpu.halted = True
 
 
-# Since `STOP` halts the CPU and the LCD until a button is pressed, modelling it needs
-# both the joypad and the PPU. For now it simply behaves like `HALT`. The byte after the
-# opcode is a decoding quirk with no meaning of its own, but it has to be consumed or it
-# decodes as an instruction.
+# `STOP` halts the CPU and the LCD until a button is pressed. Here it behaves like
+# `HALT`, which wakes on any enabled interrupt. Since Step 14 that includes a button
+# press, as long as the program has set `IE` bit 4. A real `STOP` also wakes on a button
+# with `IE` clear, and stops the LCD while it waits; neither is modelled.
+#
+# The byte after the opcode is a decoding quirk with no meaning of its own, but it has
+# to be consumed or it decodes as an instruction.
 def _stop(cpu: CPU) -> None:
     cpu.fetch_u8()
     cpu.halted = True
