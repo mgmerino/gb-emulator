@@ -48,14 +48,15 @@ class Bus:
         return cls(cartridge, Timer.post_boot(), PPU.post_boot())
 
     def read(self, address: int) -> int:
-        masked_address = bits.u16(address)
+        # `& 0xFFFF` is `bits.u16`, written out: this runs about four times per
+        # instruction, and the call would cost more than the AND.
+        masked_address = address & 0xFFFF
         # Dispatch on the region. Order the branches by how often the CPU hits
         # them, as `experiments/bench.py --profile` measures it.
         match masked_address:
-            case _ if (
-                masked_address in memory_map.ROM
-                or masked_address in memory_map.EXTERNAL_RAM
-            ):
+            # ROM starts at 0x0000, so its end is the whole test. One comparison
+            # is cheaper than `in range`, and ROM is where most reads land.
+            case _ if masked_address < memory_map.ROM.stop:
                 return self.cartridge.read(masked_address)
             # IE and IF come straight after ROM: `pending` reads both before
             # every instruction, which makes them the most read addresses after
@@ -77,6 +78,8 @@ class Bus:
                 or masked_address in memory_map.PPU_REGISTERS_2
             ):
                 return self.ppu.read(masked_address)
+            case _ if masked_address in memory_map.EXTERNAL_RAM:
+                return self.cartridge.read(masked_address)
             case _ if masked_address in memory_map.WRAM:
                 return self.wram[masked_address - memory_map.WRAM.start]
             case _ if masked_address in memory_map.VRAM:
