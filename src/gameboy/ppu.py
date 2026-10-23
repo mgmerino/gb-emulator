@@ -448,13 +448,20 @@ class PPU:
 
         # `left_edge` is negative when WX < 7, and then the window's own first columns
         # fall off the screen.
-        for column in range(max(0, left_edge), SCREEN_WIDTH):
+        # A tile at a time, as the background does. The first tile is partial
+        # only when WX < 7 pushes the window's own first columns off the screen.
+        column = max(0, left_edge)
+        while column < SCREEN_WIDTH:
             window_column = column - left_edge
             tile_index = self.vram[map_offset + window_column // 8]
-            index = self.tile_row(tile_index, row_in_tile)[window_column % 8]
 
-            self.line_indices[column] = index
-            self.framebuffer[start + column] = (self.bgp >> (index * 2)) & 0b11
+            for index in self.tile_row(tile_index, row_in_tile)[window_column % 8 :]:
+                if column == SCREEN_WIDTH:
+                    break
+
+                self.line_indices[column] = index
+                self.framebuffer[start + column] = (self.bgp >> (index * 2)) & 0b11
+                column += 1
 
         # Once per line actually drawn.
         self.window_line += 1
@@ -475,13 +482,22 @@ class PPU:
         map_base = TILE_MAP_1 if get_bit(self.lcdc, _BG_TILE_MAP) else TILE_MAP_0
         map_offset = map_base - VRAM.start + map_row * TILE_MAP_WIDTH
 
-        for x in range(SCREEN_WIDTH):
+        # A tile at a time, not a pixel at a time: one decode serves up to eight
+        # pixels. Only the first tile can start partway through its row, when
+        # SCX is not a multiple of 8; after it, `background_x % 8` is always 0.
+        x = 0
+        while x < SCREEN_WIDTH:
             background_x = (x + self.scx) % BACKGROUND_SIZE
             tile_index = self.vram[map_offset + background_x // 8]
-            index = self.tile_row(tile_index, row_in_tile)[background_x % 8]
 
-            self.line_indices[x] = index
-            self.framebuffer[start + x] = (self.bgp >> (index * 2)) & 0b11
+            for index in self.tile_row(tile_index, row_in_tile)[background_x % 8 :]:
+                # The last tile is cut by the right edge of the screen.
+                if x == SCREEN_WIDTH:
+                    break
+
+                self.line_indices[x] = index
+                self.framebuffer[start + x] = (self.bgp >> (index * 2)) & 0b11
+                x += 1
 
     def _render_objects_line(self, start: int) -> None:
         """Draw the objects covering line `ly` over the background already there."""
