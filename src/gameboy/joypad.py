@@ -1,4 +1,4 @@
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from enum import IntEnum
 from typing import Final
 
@@ -36,7 +36,7 @@ class Button(IntEnum):
 @dataclass(slots=True)
 class Joypad:
     select: int = 0
-    held: set[Button] = field(default_factory=set)
+    held: frozenset[Button] = frozenset()
 
     def read(self, address: int) -> int:
         low_nibble = _BUTTON_LINES

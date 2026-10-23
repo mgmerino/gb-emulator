@@ -15,7 +15,7 @@ from gameboy.joypad import Button, Joypad
     ],
 )
 def test_held_button_read_selected_group(written: int, expected: int) -> None:
-    joypad = Joypad(held={Button.LEFT, Button.A})
+    joypad = Joypad(held=frozenset({Button.LEFT, Button.A}))
 
     joypad.write(memory_map.JOYPAD, written)
     assert joypad.read(memory_map.JOYPAD) == expected
