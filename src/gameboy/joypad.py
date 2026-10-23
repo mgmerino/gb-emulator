@@ -54,7 +54,11 @@ class Joypad:
     def write(self, address: int, value: int) -> None:
         self.select = value & _SELECT_LINES
 
-    def hold(self, buttons: frozenset[Button]) -> bool: ...
+    def hold(self, buttons: frozenset[Button]) -> bool:
+        new_buttons = buttons - self.held
+        self.held = buttons
+
+        return any(self._group_is_selected(button) for button in new_buttons)
 
     def _group_is_selected(self, button: Button) -> bool:
         # The button's select line is the 0 in its bits 5-4. Flipping them

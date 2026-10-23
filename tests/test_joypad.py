@@ -69,3 +69,23 @@ def test_hold_writes_selected_group_button_set_and_returns_interrupt_flag(
     joypad = Joypad(select=select, held=held)
 
     assert joypad.hold(hold) == expected
+
+
+def test_a_button_held_across_frames_stays_held() -> None:
+    joypad = Joypad()
+    joypad.write(memory_map.JOYPAD, 0x10)
+
+    joypad.hold(frozenset({Button.A}))
+    joypad.hold(frozenset({Button.A}))
+
+    assert joypad.read(memory_map.JOYPAD) == 0xDE
+
+
+def test_releasing_a_button_reads_it_released() -> None:
+    joypad = Joypad()
+    joypad.write(memory_map.JOYPAD, 0x10)
+
+    joypad.hold(frozenset({Button.A}))
+    joypad.hold(NOTHING)
+
+    assert joypad.read(memory_map.JOYPAD) == 0xDF
