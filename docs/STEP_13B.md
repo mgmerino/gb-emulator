@@ -109,7 +109,7 @@ six seconds of frames, CPython 3.12:
    decode table for tile rows                21.1 - 24.6 fps
    pending returns early when IE & IF is 0   16.9 fps
    python -O alone                           15.7 fps
-   table and pending                         29.7 fps
+   table and pending                         29.7 - 32.6 fps
    table and pending, under -O               37.7 - 38.5 fps
 ```
 
