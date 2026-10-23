@@ -377,7 +377,7 @@ class PPU:
         address = self._tile_address(index) + row * 2
         offset = address - VRAM.start
 
-        return decode_row_index(self.vram[offset], self.vram[offset + 1])
+        return _DECODED_ROWS[self.vram[offset]][self.vram[offset + 1]]
 
     def _tile_address(self, index: int) -> int:
         if get_bit(self.lcdc, _TILE_DATA_SELECT):
@@ -389,7 +389,7 @@ class PPU:
         address = self._object_tile_address(index) + row * 2
         offset = address - VRAM.start
 
-        return decode_row_index(self.vram[offset], self.vram[offset + 1])
+        return _DECODED_ROWS[self.vram[offset]][self.vram[offset + 1]]
 
     def _object_tile_address(self, index: int) -> int:
         return TILE_DATA_UNSIGNED + index * TILE_SIZE
@@ -615,3 +615,13 @@ def decode_row_index(low: int, high: int) -> tuple[int, ...]:
 
 def compute_index(bit: int, high: int, low: int) -> int:
     return get_bit(high, bit) << 1 | get_bit(low, bit)
+
+
+# Every row a tile can have, decoded once at import: two bytes have 65536
+# combinations, so `_DECODED_ROWS[low][high]` is the eight colour indices
+# `decode_row_index(low, high)` would compute. Indexing two tuples costs far less
+# than eight calls to `compute_index`, and the renderer decodes a row for every
+# tile it draws. The function stays as the definition, and its tests with it.
+_DECODED_ROWS: Final = tuple(
+    tuple(decode_row_index(low, high) for high in range(256)) for low in range(256)
+)
