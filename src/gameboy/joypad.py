@@ -1,4 +1,4 @@
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from enum import IntEnum
 from typing import Final
 
@@ -36,18 +36,13 @@ class Button(IntEnum):
 @dataclass(slots=True)
 class Joypad:
     select: int = 0
-    held: set[Button] = field(default_factory=set)
+    held: frozenset[Button] = frozenset()
 
     def read(self, address: int) -> int:
         low_nibble = _BUTTON_LINES
 
         for button in self.held:
-            # The button's select line is the 0 in its bits 5-4. Flipping them
-            # inside the mask turns that 0 into a bit to test `select` with.
-            group_bit = _SELECT_LINES ^ (button & _SELECT_LINES)
-            selected = (self.select & group_bit) == 0
-
-            if selected:
+            if self._group_is_selected(button):
                 # Same flip on bits 3-0: the 0 in the pattern becomes the one
                 # bit this button pulls down.
                 pattern = button & _BUTTON_LINES
@@ -58,3 +53,15 @@ class Joypad:
 
     def write(self, address: int, value: int) -> None:
         self.select = value & _SELECT_LINES
+
+    def hold(self, buttons: frozenset[Button]) -> bool:
+        new_buttons = buttons - self.held
+        self.held = buttons
+
+        return any(self._group_is_selected(button) for button in new_buttons)
+
+    def _group_is_selected(self, button: Button) -> bool:
+        # The button's select line is the 0 in its bits 5-4. Flipping them
+        # inside the mask turns that 0 into a bit to test `select` with.
+        group_bit = _SELECT_LINES ^ (button & _SELECT_LINES)
+        return (self.select & group_bit) == 0

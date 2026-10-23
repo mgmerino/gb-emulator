@@ -8,7 +8,7 @@ from typing import Protocol, Self, final
 
 from gameboy import bits, interrupts, memory_map
 from gameboy.interrupts import Interrupt, request
-from gameboy.joypad import Joypad
+from gameboy.joypad import Button, Joypad
 from gameboy.ppu import PPU
 from gameboy.serial import Serial
 from gameboy.timer import Timer
@@ -141,6 +141,10 @@ class Bus:
                 return
             case _:
                 return
+
+    def hold(self, buttons: frozenset[Button]) -> None:
+        if self.joypad.hold(buttons):
+            request(self, Interrupt.JOYPAD)
 
     def tick(self, cycles: int) -> None:
         """Fan the elapsed time out to the devices hanging off the bus."""

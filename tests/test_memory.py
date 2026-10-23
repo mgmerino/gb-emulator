@@ -524,7 +524,7 @@ def test_the_joypad_top_bits_are_unwired(bus: Bus) -> None:
 
 
 def test_joypad_reads_through_the_bus(bus: Bus) -> None:
-    bus.joypad.held.add(Button.LEFT)
+    bus.hold(frozenset({Button.LEFT}))
     bus.write(JOYPAD, 0x20)
 
     assert bus.read(JOYPAD) == 0xED
