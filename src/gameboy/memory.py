@@ -50,13 +50,22 @@ class Bus:
     def read(self, address: int) -> int:
         masked_address = bits.u16(address)
         # Dispatch on the region. Order the branches by how often the CPU hits
-        # them, ROM and WRAM dominate.
+        # them, as `experiments/bench.py --profile` measures it.
         match masked_address:
             case _ if (
                 masked_address in memory_map.ROM
                 or masked_address in memory_map.EXTERNAL_RAM
             ):
                 return self.cartridge.read(masked_address)
+            # IE and IF come straight after ROM: `pending` reads both before
+            # every instruction, which makes them the most read addresses after
+            # ROM. Every `case` above a hit is a comparison paid for it.
+            case memory_map.INTERRUPT_ENABLE:
+                return self.ie
+            case memory_map.INTERRUPT_FLAG:
+                # Only five sources exist, so bits 7-5 are not wired to anything
+                # and an unwired line on this bus reads high.
+                return self.i_flag | memory_map.INTERRUPT_FLAG_UNUSED
             case _ if masked_address in memory_map.TIMER_REGISTERS:
                 return self.timer.read(masked_address)
             case memory_map.JOYPAD:
@@ -68,10 +77,6 @@ class Bus:
                 or masked_address in memory_map.PPU_REGISTERS_2
             ):
                 return self.ppu.read(masked_address)
-            case memory_map.INTERRUPT_FLAG:
-                # Only five sources exist, so bits 7-5 are not wired to anything
-                # and an unwired line on this bus reads high.
-                return self.i_flag | memory_map.INTERRUPT_FLAG_UNUSED
             case _ if masked_address in memory_map.WRAM:
                 return self.wram[masked_address - memory_map.WRAM.start]
             case _ if masked_address in memory_map.VRAM:
@@ -84,8 +89,6 @@ class Bus:
                 return self.io[masked_address - memory_map.IO.start]
             case _ if masked_address in memory_map.HRAM:
                 return self.hram[masked_address - memory_map.HRAM.start]
-            case memory_map.INTERRUPT_ENABLE:
-                return self.ie
             case _ if masked_address in memory_map.PROHIBITED:
                 return memory_map.PROHIBITED_READ
             case _:
