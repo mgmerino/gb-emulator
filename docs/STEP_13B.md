@@ -120,9 +120,49 @@ why task 1 asks for three runs before believing any of them. These numbers show
 the order of magnitude of each change. Your own measurements are the ones that
 count.
 
-They also show that these three changes alone do not reach 59.7. The rest of the
-distance is whatever the next profile shows once these three are gone, which is
-why task 4 starts with a new profile.
+A second round, taking the best of three four-second runs instead of single
+runs, and adding one more change: walking the background a tile at a time, so
+each tile row is decoded once for its eight pixels instead of once per pixel.
+
+```
+   baseline                                          13.8 fps
+   table, pending, -O                                45.0 fps
+   table, pending, -O, decode once per tile          52.8 fps
+```
+
+The frame digest from section 6 was the same in all three runs, so none of the
+changes moved a pixel. Taking the best of several runs is also why 45.0 is
+higher than the 38 above: the best run is the one least disturbed by the rest of
+the machine.
+
+With those four changes in, the profile looks like this:
+
+```
+   machine.step                                   100%
+   ├── bus.tick                                    61%   runs after every instruction
+   │   ├── ppu.tick                                41%
+   │   │   ├── rendering                           27%
+   │   │   └── _stat_line_level                     9%   recomputed every instruction
+   │   └── timer.tick                              16%
+   └── cpu.step                                    35%
+```
+
+`bus.tick` runs after every instruction, about 7650 times a frame. Most of those
+calls change nothing visible. The PPU only does something when it crosses into a
+new mode or a new line, and the STAT line can only change at those same points.
+The timer's counter only moves on some of them.
+
+So the next cost is advancing devices that have nothing to do. Section 3's
+"skip the common case early" applies again: a `tick` that works out it has not
+crossed a boundary can return straight away. That is where task 4 should look
+after `pending`, and with 52.8 measured and those ticks untouched, 59.7 is
+within reach in CPython.
+
+A larger version of the same idea is a scheduler. Each device reports how many
+cycles until its next event, and nothing ticks it until then. Emulators that
+need more speed than this one are built that way. It changes the shape of the
+whole loop, so it is not this step's business; the early returns should be
+enough.
 
 ### 5. `python -O`
 
@@ -277,6 +317,10 @@ and the register guard.
   the answer on almost every call.
 - **The register guard** goes away under `-O`. Decide whether the window runs
   with it, per section 5, and say so in the README.
+- **`bus.tick`**, per the second profile in section 4. `ppu.tick` recomputes the
+  mode and the STAT line after every instruction, and `timer.tick` checks its
+  counter. Find the cheapest test that says "no boundary crossed", and return
+  before the rest of the work.
 - **Whatever the new profile shows next.** Pick the top item, change one thing,
   measure. Stop when the change stops paying for itself.
 
