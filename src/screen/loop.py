@@ -85,6 +85,11 @@ def run(
 
     try:
         while not display.wants_to_close():
+            # After `wants_to_close`, which drains this frame's events, and
+            # before `run_frame`, which is when the ROM reads P1. One line
+            # lower and every press reaches the game a frame late.
+            bus.hold(display.held())
+
             # Present either way. A `False` here means the ROM has the LCD off,
             # which is a normal thing for it to do, and the last good frame is
             # what a real Game Boy would still be showing.

@@ -4,10 +4,13 @@ import pytest
 
 from gameboy.cartridge import Cartridge
 from gameboy.cpu import CPU, Registers
+from gameboy.joypad import Button
 from gameboy.memory import Bus
 from gameboy.ppu import PPU, SCREEN_HEIGHT, SCREEN_WIDTH
 from gameboy.timer import Timer
 from screen.loop import REPORT_EVERY, FrameRate, run
+
+NOTHING: frozenset[Button] = frozenset()
 
 
 class Clock:
@@ -26,17 +29,24 @@ class Clock:
 class FakeDisplay:
     """A `Display` that counts what it was asked to do and then gives up.
 
-    No inheritance, like `FakeCartridge`: having the three methods is the whole
+    No inheritance, like `FakeCartridge`: having the four methods is the whole
     contract.
     """
 
-    def __init__(self, frames: int, clock: Clock | None = None, step: float = 0.0):
+    def __init__(
+        self,
+        frames: int,
+        clock: Clock | None = None,
+        step: float = 0.0,
+        buttons: frozenset[Button] = NOTHING,
+    ):
         self.remaining = frames
         self.presented = 0
         self.last_frame: memoryview | None = None
         self.rates: list[float] = []
         self._clock = clock
         self._step = step
+        self._buttons = buttons
 
     def present(self, frame: memoryview) -> None:
         self.presented += 1
@@ -55,6 +65,9 @@ class FakeDisplay:
 
     def show_rate(self, rate: float) -> None:
         self.rates.append(rate)
+
+    def held(self) -> frozenset[Button]:
+        return self._buttons
 
 
 @pytest.fixture
@@ -184,3 +197,12 @@ def test_the_window_slides(clock: Clock) -> None:
 
     # The window now holds the tail of the fast run and all of the slow one.
     assert 10.0 < rate.per_second < 100.0
+
+
+def test_the_held_buttons_reach_the_bus(spinning: Cartridge) -> None:
+    cpu, bus = machine(spinning, lcd_on=True)
+    display = FakeDisplay(frames=1, buttons=frozenset({Button.START}))
+
+    run(display, cpu, bus)
+
+    assert bus.joypad.held == frozenset({Button.START})

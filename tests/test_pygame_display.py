@@ -10,6 +10,7 @@ from collections.abc import Iterator
 
 import pytest
 
+from gameboy.joypad import Button
 from gameboy.ppu import PPU
 from screen.display import Display
 
@@ -59,3 +60,32 @@ def test_it_drains_the_queue(window: PygameDisplay) -> None:
 
     assert window.wants_to_close()
     assert not pygame.event.peek()
+
+
+def test_a_key_down_holds_its_button(window: PygameDisplay) -> None:
+    pygame.event.post(pygame.event.Event(pygame.KEYDOWN, key=pygame.K_x))
+    window.wants_to_close()
+
+    assert window.held() == frozenset({Button.A})
+
+
+def test_a_key_up_releases_its_button(window: PygameDisplay) -> None:
+    pygame.event.post(pygame.event.Event(pygame.KEYDOWN, key=pygame.K_x))
+    pygame.event.post(pygame.event.Event(pygame.KEYUP, key=pygame.K_x))
+    window.wants_to_close()
+
+    assert window.held() == frozenset()
+
+
+def test_a_key_outside_the_table_holds_nothing(window: PygameDisplay) -> None:
+    pygame.event.post(pygame.event.Event(pygame.KEYDOWN, key=pygame.K_q))
+    window.wants_to_close()
+
+    assert window.held() == frozenset()
+
+
+def test_a_key_up_without_its_key_down_is_ignored(window: PygameDisplay) -> None:
+    pygame.event.post(pygame.event.Event(pygame.KEYUP, key=pygame.K_x))
+    window.wants_to_close()
+
+    assert window.held() == frozenset()
