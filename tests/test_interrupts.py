@@ -4,8 +4,9 @@ from conftest import CpuRunning
 from gameboy.bits import get_bit
 from gameboy.cpu import CPU
 from gameboy.interrupts import Interrupt, pending, request
+from gameboy.joypad import Button
 from gameboy.memory import Bus
-from gameboy.memory_map import INTERRUPT_ENABLE, INTERRUPT_FLAG
+from gameboy.memory_map import INTERRUPT_ENABLE, INTERRUPT_FLAG, JOYPAD
 
 
 def test_interrupt_table_vectors() -> None:
@@ -367,3 +368,22 @@ def test_a_pending_source_is_serviced_before_halt_is_ever_fetched(
     assert cpu.step() == 20
     assert cpu.registers.pc == Interrupt.VBLANK.vector
     assert cpu.halted is False
+
+
+def test_the_joypad_requests_its_interrupt_on_a_new_press(bus: Bus) -> None:
+    bus.write(JOYPAD, 0x10)
+
+    bus.hold(frozenset({Button.A}))
+
+    assert get_bit(bus.read(INTERRUPT_FLAG), Interrupt.JOYPAD)
+
+
+def test_the_joypad_wont_request_its_interrupt_on_same_press(bus: Bus) -> None:
+    bus.write(JOYPAD, 0x10)
+
+    bus.hold(frozenset({Button.A}))
+    bus.write(INTERRUPT_FLAG, 0)
+
+    bus.hold(frozenset({Button.A}))
+
+    assert not get_bit(bus.read(INTERRUPT_FLAG), Interrupt.JOYPAD)
