@@ -155,6 +155,9 @@ _TALL_TILE_MASK: Final = 0xFE
 
 _STAT_UNUSED: Final = 0x80  # bit 7, not wired, reads 1
 _STAT_SELECTS: Final = 0x78  # bits 6-3, allowed for write select
+_LYC_SELECT: Final = 0x40  # STAT bit 6
+# STAT's select bit for each mode, indexed by `Mode`. Drawing has none.
+_MODE_SELECT: Final = (0x08, 0x10, 0x20, 0x00)
 
 
 class Mode(IntEnum):
@@ -590,12 +593,15 @@ class PPU:
         # mode == 1 ──── AND ──── STAT bit 4 ──┤                    │
         #                                      │                    ▼
         # mode == 2 ──── AND ──── STAT bit 5 ──┘             IF bit 1 · 0xFF0F
-        lyc = get_bit(self.stat, 6) and self.ly == self.lyc
-        mode0 = get_bit(self.stat, 3) and self.mode is Mode.HBLANK
-        mode1 = get_bit(self.stat, 4) and self.mode is Mode.VBLANK
-        mode2 = get_bit(self.stat, 5) and self.mode is Mode.OAM_SCAN
+        #
+        # The three mode rows collapse into one lookup: each mode has its own
+        # select bit, so `_MODE_SELECT[mode]` is the one bit of STAT that can let
+        # this mode through. This runs after every instruction, which is why it
+        # is a table and not three `get_bit` calls.
+        if self.stat & _MODE_SELECT[self.mode]:
+            return True
 
-        return bool(lyc or mode0 or mode1 or mode2)
+        return bool(self.stat & _LYC_SELECT) and self.ly == self.lyc
 
     def _switch_off(self) -> None:
         """Stop the PPU, per `LCDC` bit 7. The counters reset, so the PPU is already at
