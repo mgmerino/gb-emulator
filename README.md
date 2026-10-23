@@ -29,7 +29,7 @@ tour:
 | 12A | [Objects: OAM, the DMA, priority and flips](docs/STEP_12A.md) | done |
 | 12B | [The window, and its internal line counter](docs/STEP_12B.md) | done |
 | 13A | [The screen, and the loop turned around](docs/STEP_13A.md) | done |
-| 13B | Real time: profile, optimise, then pace the frames | next |
+| 13B | [Real time: profile, optimise, then pace the frames](docs/STEP_13B.md) | done |
 | 14 | [The joypad](docs/STEP_14.md) | done |
 
 ## Requirements
@@ -152,8 +152,13 @@ Play a ROM in a window. The window needs pygame, which is an optional extra, so
 the emulator and its tests still install nothing:
 
 ```
-uv run --extra gui python -m screen path/to/TETRIS.gb --scale 3
+uv run --extra gui python -O -m screen path/to/TETRIS.gb --scale 3
 ```
+
+`-O` matters here. It drops the check on every register write that guards
+against masking bugs in the instruction set, and with it in place the emulator
+runs at about three quarters of real time instead of all of it. The tests run
+without `-O`, so the check keeps guarding there.
 
 | Game Boy | Key |
 | --- | --- |
@@ -163,8 +168,9 @@ uv run --extra gui python -m screen path/to/TETRIS.gb --scale 3
 | Start | Enter |
 | Select | Backspace |
 
-The title bar shows the frame rate, averaged over the last second, and the
-console prints it once more on exit.
+The window holds itself to the DMG's 59.7 frames per second. The title bar
+shows the rate, averaged over the last second, and the console prints it once
+more on exit. `--unpaced` lets it run as fast as it can.
 
 ## Test ROMs
 
@@ -189,9 +195,18 @@ with is the timer. One `Passed` therefore verifies every cycle count in the
 opcode table — both branches of the conditionals included — *and* that the timer
 runs at the rate it claims.
 
-Speed, measured on Tetris's title screen with no window: about 13 frames per
-second on CPython 3.12, against the 59.7 a DMG produces, so roughly a quarter of
-real time. Step 13B is the profile and the optimisation.
+Speed, measured with `experiments/bench.py` on Tetris's title screen, no window,
+best of five runs on CPython 3.12:
+
+| | fps | of real time |
+| --- | --- | --- |
+| before Step 13B | 16.0 | 27% |
+| after, without `-O` | 42 | 70% |
+| after, with `-O` | 56-61 | 94-102% |
+
+The `-O` row spans a range because this machine scales its CPU frequency, and
+the same code measures several fps apart between runs. Each optimisation and its
+number is its own commit; `git log --grep perf` lists them.
 
 [`dmg-acid2`](https://github.com/mattcurrie/dmg-acid2) is the video equivalent,
 and it passes: all 23040 pixels match its reference image.
@@ -256,9 +271,8 @@ The DMG's video hardware is done: every bit of `LCDC` does what it says, and
 `dmg-acid2` matches its reference image pixel for pixel. What is left is
 everything around it.
 
-**Speed.** A game runs at about a quarter of real time, so it plays in slow
-motion. Nothing paces the frames either: once it is fast enough, it will run too
-fast. Both are Step 13B.
+**Headroom.** Under `-O` the emulator runs at about real time, with little to
+spare. A busier scene than the title screen, or sound, can push it below 59.7.
 
 **Timing a ROM can measure.** VRAM and OAM are readable during mode 3, mode 3 is
 fixed at its 172-dot minimum, and there is no pixel FIFO — so a game that

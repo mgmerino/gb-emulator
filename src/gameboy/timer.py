@@ -95,6 +95,14 @@ class Timer:
         watched_bit = _WATCHED_BITS[self.tac & 0b11]
         enable = get_bit(self.tac, 2)
 
+        # With the timer off and the gate already low, the gate stays low for
+        # every sample below, so no sample can see a falling edge. Only the
+        # counter moves, by the same amount the loop would have moved it.
+        if not enable and not self.last_and:
+            steps = len(range(0, cycles, 4))
+            self.counter = u16(self.counter + 4 * steps)
+            return False
+
         for _ in range(0, cycles, 4):
             self.counter = u16(self.counter + 4)
             if self._advance_tima(watched_bit, enable):

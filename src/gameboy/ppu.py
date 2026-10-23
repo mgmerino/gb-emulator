@@ -155,6 +155,9 @@ _TALL_TILE_MASK: Final = 0xFE
 
 _STAT_UNUSED: Final = 0x80  # bit 7, not wired, reads 1
 _STAT_SELECTS: Final = 0x78  # bits 6-3, allowed for write select
+_LYC_SELECT: Final = 0x40  # STAT bit 6
+# STAT's select bit for each mode, indexed by `Mode`. Drawing has none.
+_MODE_SELECT: Final = (0x08, 0x10, 0x20, 0x00)
 
 
 class Mode(IntEnum):
@@ -377,7 +380,7 @@ class PPU:
         address = self._tile_address(index) + row * 2
         offset = address - VRAM.start
 
-        return decode_row_index(self.vram[offset], self.vram[offset + 1])
+        return _DECODED_ROWS[self.vram[offset]][self.vram[offset + 1]]
 
     def _tile_address(self, index: int) -> int:
         if get_bit(self.lcdc, _TILE_DATA_SELECT):
@@ -389,7 +392,7 @@ class PPU:
         address = self._object_tile_address(index) + row * 2
         offset = address - VRAM.start
 
-        return decode_row_index(self.vram[offset], self.vram[offset + 1])
+        return _DECODED_ROWS[self.vram[offset]][self.vram[offset + 1]]
 
     def _object_tile_address(self, index: int) -> int:
         return TILE_DATA_UNSIGNED + index * TILE_SIZE
@@ -448,13 +451,20 @@ class PPU:
 
         # `left_edge` is negative when WX < 7, and then the window's own first columns
         # fall off the screen.
-        for column in range(max(0, left_edge), SCREEN_WIDTH):
+        # A tile at a time, as the background does. The first tile is partial
+        # only when WX < 7 pushes the window's own first columns off the screen.
+        column = max(0, left_edge)
+        while column < SCREEN_WIDTH:
             window_column = column - left_edge
             tile_index = self.vram[map_offset + window_column // 8]
-            index = self.tile_row(tile_index, row_in_tile)[window_column % 8]
 
-            self.line_indices[column] = index
-            self.framebuffer[start + column] = (self.bgp >> (index * 2)) & 0b11
+            for index in self.tile_row(tile_index, row_in_tile)[window_column % 8 :]:
+                if column == SCREEN_WIDTH:
+                    break
+
+                self.line_indices[column] = index
+                self.framebuffer[start + column] = (self.bgp >> (index * 2)) & 0b11
+                column += 1
 
         # Once per line actually drawn.
         self.window_line += 1
@@ -475,13 +485,22 @@ class PPU:
         map_base = TILE_MAP_1 if get_bit(self.lcdc, _BG_TILE_MAP) else TILE_MAP_0
         map_offset = map_base - VRAM.start + map_row * TILE_MAP_WIDTH
 
-        for x in range(SCREEN_WIDTH):
+        # A tile at a time, not a pixel at a time: one decode serves up to eight
+        # pixels. Only the first tile can start partway through its row, when
+        # SCX is not a multiple of 8; after it, `background_x % 8` is always 0.
+        x = 0
+        while x < SCREEN_WIDTH:
             background_x = (x + self.scx) % BACKGROUND_SIZE
             tile_index = self.vram[map_offset + background_x // 8]
-            index = self.tile_row(tile_index, row_in_tile)[background_x % 8]
 
-            self.line_indices[x] = index
-            self.framebuffer[start + x] = (self.bgp >> (index * 2)) & 0b11
+            for index in self.tile_row(tile_index, row_in_tile)[background_x % 8 :]:
+                # The last tile is cut by the right edge of the screen.
+                if x == SCREEN_WIDTH:
+                    break
+
+                self.line_indices[x] = index
+                self.framebuffer[start + x] = (self.bgp >> (index * 2)) & 0b11
+                x += 1
 
     def _render_objects_line(self, start: int) -> None:
         """Draw the objects covering line `ly` over the background already there."""
@@ -574,12 +593,15 @@ class PPU:
         # mode == 1 ──── AND ──── STAT bit 4 ──┤                    │
         #                                      │                    ▼
         # mode == 2 ──── AND ──── STAT bit 5 ──┘             IF bit 1 · 0xFF0F
-        lyc = get_bit(self.stat, 6) and self.ly == self.lyc
-        mode0 = get_bit(self.stat, 3) and self.mode is Mode.HBLANK
-        mode1 = get_bit(self.stat, 4) and self.mode is Mode.VBLANK
-        mode2 = get_bit(self.stat, 5) and self.mode is Mode.OAM_SCAN
+        #
+        # The three mode rows collapse into one lookup: each mode has its own
+        # select bit, so `_MODE_SELECT[mode]` is the one bit of STAT that can let
+        # this mode through. This runs after every instruction, which is why it
+        # is a table and not three `get_bit` calls.
+        if self.stat & _MODE_SELECT[self.mode]:
+            return True
 
-        return bool(lyc or mode0 or mode1 or mode2)
+        return bool(self.stat & _LYC_SELECT) and self.ly == self.lyc
 
     def _switch_off(self) -> None:
         """Stop the PPU, per `LCDC` bit 7. The counters reset, so the PPU is already at
@@ -599,3 +621,13 @@ def decode_row_index(low: int, high: int) -> tuple[int, ...]:
 
 def compute_index(bit: int, high: int, low: int) -> int:
     return get_bit(high, bit) << 1 | get_bit(low, bit)
+
+
+# Every row a tile can have, decoded once at import: two bytes have 65536
+# combinations, so `_DECODED_ROWS[low][high]` is the eight colour indices
+# `decode_row_index(low, high)` would compute. Indexing two tuples costs far less
+# than eight calls to `compute_index`, and the renderer decodes a row for every
+# tile it draws. The function stays as the definition, and its tests with it.
+_DECODED_ROWS: Final = tuple(
+    tuple(decode_row_index(low, high) for high in range(256)) for low in range(256)
+)
