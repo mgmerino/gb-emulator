@@ -5,6 +5,7 @@ from typing import Final
 import pygame
 from pygame.surface import Surface
 
+from gameboy.joypad import Button
 from gameboy.ppu import SCREEN_HEIGHT, SCREEN_WIDTH
 
 GREENS: Final = (
@@ -14,6 +15,18 @@ GREENS: Final = (
     (0x0F, 0x38, 0x0F),  # shade 3, darkest
 )
 
+# Z sits left of X on the keyboard, as B sits left of A on the Game Boy.
+KEYS: Final[dict[int, Button]] = {
+    pygame.K_RETURN: Button.START,
+    pygame.K_BACKSPACE: Button.SELECT,
+    pygame.K_x: Button.A,
+    pygame.K_z: Button.B,
+    pygame.K_DOWN: Button.DOWN,
+    pygame.K_UP: Button.UP,
+    pygame.K_LEFT: Button.LEFT,
+    pygame.K_RIGHT: Button.RIGHT,
+}
+
 
 class PygameDisplay:
     """A window, 160x144 scaled up, wearing the four greens."""
@@ -21,6 +34,7 @@ class PygameDisplay:
     _scale: int
     _screen: Surface
     _title: str
+    _held: set[Button]
 
     def __init__(self, scale: int = 3, title: str = "gameboy") -> None:
         # The window is the scaled size and `present` does the scaling, rather
@@ -36,6 +50,9 @@ class PygameDisplay:
             (SCREEN_WIDTH * scale, SCREEN_HEIGHT * scale)
         )
         self._title = title
+        # A plain set, changed by every key event. `held` hands out a frozen
+        # copy, so nobody outside sees it change under them.
+        self._held = set()
 
         pygame.display.set_caption(title)
 
@@ -65,10 +82,24 @@ class PygameDisplay:
         should_close = False
 
         for event in pygame.event.get():
+            # `event.type` says what happened, `event.key` which key it
+            # happened to. Keys missing from KEYS are not the game's.
             if event.type == pygame.QUIT:
                 should_close = True
+            elif event.type == pygame.KEYDOWN and event.key in KEYS:
+                self._held.add(KEYS[event.key])
+            elif event.type == pygame.KEYUP and event.key in KEYS:
+                # `discard`, not `remove`: a key already down when the window
+                # opened sends a KEYUP with no KEYDOWN before it.
+                self._held.discard(KEYS[event.key])
 
         return should_close
+
+    def held(self) -> frozenset[Button]:
+        """The buttons down as of the last `wants_to_close`, which is what
+        reads the events.
+        """
+        return frozenset(self._held)
 
     def show_rate(self, rate: float) -> None:
         """Put the frame rate where a window can show it for free."""
