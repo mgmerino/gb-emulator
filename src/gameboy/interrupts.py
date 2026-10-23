@@ -41,6 +41,11 @@ def pending(bus: MemoryDevice) -> Interrupt | None:
     i_flag = bus.read(INTERRUPT_FLAG)
     result = ie & i_flag & 0x1F
 
+    # The CPU asks before every instruction, and the answer is nearly always
+    # "nothing". Return before walking the enum.
+    if not result:
+        return None
+
     # The order is the implied priority. If any, will return the lowest one
     for interrupt in Interrupt:
         if get_bit(result, interrupt):
