@@ -8,13 +8,18 @@ import time
 from collections import deque
 
 from gameboy.cpu import CPU
-from gameboy.machine import FRAME_CYCLES, run_frame
+from gameboy.machine import CLOCK_HZ, FRAME_CYCLES, run_frame
 from gameboy.memory import Bus
 from screen.display import Display
 
 # How often the rate is reported. A number that changes sixty times a second is
 # unreadable, and setting a window title asks the window manager for something.
 REPORT_EVERY: float = 1.0
+
+# How long a DMG frame lasts, in seconds: 70224 T-cycles at 4194304 a second,
+# about 16.74 ms. Derived rather than typed, so it cannot drift from the core's
+# own numbers. 1/60 would run 0.45% fast.
+FRAME_PERIOD: float = FRAME_CYCLES / CLOCK_HZ
 
 
 class FrameRate:
@@ -71,14 +76,59 @@ class FrameRate:
             self._ticks.popleft()
 
 
+class Pacer:
+    """Holds frames to the DMG's rate by sleeping until each one's deadline.
+
+    Each deadline is the previous deadline plus one period, not the moment the
+    last sleep ended. `time.sleep` wakes a little late, and measuring from the
+    wake-up would add that lateness to every frame and drift behind.
+
+    A frame that overruns its deadline gets no sleep, and the next deadline
+    starts from now. Catching up instead would run a burst of unpaced frames
+    after every slow one.
+
+    Both clocks are looked up on `time` at call time, so the tests can replace
+    them the same way they replace `perf_counter` for `FrameRate`.
+    """
+
+    _period: float
+    _deadline: float | None
+
+    def __init__(self, period: float = FRAME_PERIOD) -> None:
+        self._period = period
+        self._deadline = None
+
+    def wait(self) -> None:
+        """Sleep until the end of the current frame's period."""
+        now = time.perf_counter()
+
+        # The first frame has nothing to be measured against.
+        if self._deadline is None:
+            self._deadline = now + self._period
+            return
+
+        if now < self._deadline:
+            time.sleep(self._deadline - now)
+            self._deadline += self._period
+        else:
+            self._deadline = now + self._period
+
+
 def run(
-    display: Display, cpu: CPU, bus: Bus, budget: int = FRAME_CYCLES * 4
+    display: Display,
+    cpu: CPU,
+    bus: Bus,
+    budget: int = FRAME_CYCLES * 4,
+    pacer: Pacer | None = None,
 ) -> FrameRate:
     """Run frames into `display` until it says to stop. Returns the meter, so
     the caller can print a last number on the way out.
 
     Typed against the Protocol and not against `PygameDisplay`: this is the
     function task 5 drives with a fake that counts calls and stops after a few.
+
+    With no `pacer` it runs as fast as it can, which is what the tests and
+    `--unpaced` want.
     """
     rate = FrameRate()
     reported_at = time.perf_counter()
@@ -97,6 +147,9 @@ def run(
                 rate.tick()
 
             display.present(bus.ppu.frame)
+
+            if pacer is not None:
+                pacer.wait()
 
             now = time.perf_counter()
             if now - reported_at >= REPORT_EVERY:

@@ -7,7 +7,7 @@ from gameboy.cartridge import Cartridge, InvalidCartridgeError
 from gameboy.cpu import CPU, Registers
 from gameboy.machine import FRAME_CYCLES
 from gameboy.memory import Bus
-from screen.loop import run
+from screen.loop import Pacer, run
 from screen.pygame_display import PygameDisplay
 
 
@@ -24,6 +24,11 @@ def main() -> int:
         type=int,
         default=FRAME_CYCLES * 4,
         help="T-cycles to spend on one frame before giving up on it",
+    )
+    parser.add_argument(
+        "--unpaced",
+        action="store_true",
+        help="run as fast as possible instead of at the DMG's 59.7 frames a second",
     )
     args = parser.parse_args()
 
@@ -44,7 +49,8 @@ def main() -> int:
     title = cartridge.header.title or args.rom.stem
     display = PygameDisplay(scale=args.scale, title=title)
 
-    rate = run(display, cpu, bus, args.budget)
+    pacer = None if args.unpaced else Pacer()
+    rate = run(display, cpu, bus, args.budget, pacer)
 
     # The live number is gone with the window, and 13B needs a before and an
     # after it can paste somewhere.
