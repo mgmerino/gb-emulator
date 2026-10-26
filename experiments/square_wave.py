@@ -4,7 +4,7 @@ import argparse
 import wave
 from array import array
 from pathlib import Path
-from typing import Final
+from typing import Final, NamedTuple
 
 SAMPLE_RATE: Final = 48_000
 WAVE_PEAK: Final = 8_000
@@ -17,6 +17,22 @@ DUTY_PATTERNS: Final[tuple[tuple[int, ...], ...]] = (
     (1, 0, 0, 0, 0, 0, 0, 1),  # 25%   -______-
     (1, 0, 0, 0, 0, 1, 1, 1),  # 50%   -____---
     (0, 1, 1, 1, 1, 1, 1, 0),  # 75%   _------_
+)
+CLOCK_HZ: Final = 4_194_304
+PULSE_HZ: Final = CLOCK_HZ // 4 // DUTY_STEPS
+
+
+class Note(NamedTuple):
+    period: int
+    length: int
+
+
+# Each period value is the integer closest to `2048 - PULSE_HZ / frequency`
+MELODY: Final[tuple[Note, ...]] = (
+    Note(period=1547, length=12000),  # C4 261.62 Hz
+    Note(period=1650, length=12000),  # E4 329.33 Hz
+    Note(period=1714, length=12000),  # G4 392.43 Hz
+    Note(period=1798, length=12000),  # C5 524.29 Hz
 )
 
 
@@ -55,16 +71,32 @@ def main() -> int:
         action="store_true",
         help="make the envelope go up instead of down",
     )
-    args = parser.parse_args()
-    count: int = round(args.seconds * SAMPLE_RATE)
-    samples = square(
-        frequency=args.frequency,
-        count=count,
-        duty=args.duty,
-        initial_volume=args.volume,
-        increase=args.increase,
-        pace=args.pace,
+    parser.add_argument(
+        "--melody",
+        action="store_true",
+        help="play the built-in melody instead of a single tone",
     )
+
+    args = parser.parse_args()
+    if args.melody:
+        samples = build_melody(
+            notes=MELODY,
+            duty=args.duty,
+            initial_volume=args.volume,
+            increase=args.increase,
+            pace=args.pace,
+        )
+    else:
+        count: int = round(args.seconds * SAMPLE_RATE)
+        samples = square(
+            frequency=args.frequency,
+            count=count,
+            duty=args.duty,
+            initial_volume=args.volume,
+            increase=args.increase,
+            pace=args.pace,
+        )
+
     write_wav(path=args.output, samples=samples)
 
     return 0
@@ -110,6 +142,33 @@ def volume_at(i: int, start: int, increase: bool, pace: int) -> int:
         volume = start - offset
 
     return min(max(volume, 0), MAX_VOLUME)
+
+
+def period_to_hz(period: int) -> float:
+    step_ticks = 2048 - period
+    frequency = PULSE_HZ / step_ticks
+
+    return frequency
+
+
+def build_melody(
+    notes: tuple[Note, ...], duty: int, initial_volume: int, increase: bool, pace: int
+) -> list[int]:
+    melody: list[int] = []
+
+    for note in notes:
+        frequency = period_to_hz(note.period)
+        sound_wave = square(
+            frequency=frequency,
+            count=note.length,
+            duty=duty,
+            initial_volume=initial_volume,
+            increase=increase,
+            pace=pace,
+        )
+        melody.extend(sound_wave)
+
+    return melody
 
 
 def write_wav(path: Path, samples: list[int]) -> None:
