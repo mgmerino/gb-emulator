@@ -129,6 +129,13 @@ def main() -> int:
 
     write_wav(path=args.output, samples=samples)
 
+    seconds = len(samples) / SAMPLE_RATE
+    peak = max(abs(sample) for sample in samples)
+    print(
+        f"wrote {args.output}   {len(samples)} samples   "
+        f"{seconds:.2f} s at {SAMPLE_RATE} Hz   peak {peak}"
+    )
+
     return 0
 
 
