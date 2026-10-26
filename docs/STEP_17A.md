@@ -237,10 +237,14 @@ moves the cone the way both would. The DMG mixes its four channels this way.
 
 The sum can go past 32767. Two voices at 8000 peak add up to at most 16000,
 which fits. Two voices at full scale add up to 65534, which does not. A sample
-outside the range cannot be stored. If you clamp it to 32767 instead, the top of
-the wave is flattened and you hear a harsh distortion called clipping. Either
-way, the fix is to leave room: pick the peak of each voice so that the sum of
-all of them still fits.
+outside the range cannot be stored. If you clamp it to 32767 instead, every
+sample past the limit is cut to the limit. On a smooth wave that flattens its
+top, and you hear a harsh distortion called clipping. A square wave is already
+flat, so clamping changes less. Two square voices at the same volume sum to
+three levels, and clamping keeps the same three levels at a smaller scale. With
+different volumes, clamping changes how loud one voice is against the other.
+Either way, the fix is to leave room: pick the peak of each voice so that the
+sum of all of them still fits.
 
 ### 10. The WAV file
 
@@ -355,8 +359,8 @@ Say what happens with `array("h")`, and decide whether the script should raise
 or clamp. Keep the peaks at 8000 in the version you commit.
 
 **Acceptance:** a file with two voices, both clearly audible. At full scale, the
-script either raises `OverflowError` before writing or clamps. If it clamps, the
-distortion is audible.
+script either raises `OverflowError` before writing or clamps. If it clamps, a
+comment says what clamping does to two square voices.
 
 ---
 
