@@ -8,6 +8,10 @@ from typing import Final
 
 SAMPLE_RATE: Final = 48_000
 WAVE_PEAK: Final = 8_000
+ENVELOPE_HZ: Final = 64
+TICK_SAMPLES: Final = SAMPLE_RATE // ENVELOPE_HZ
+MAX_VOLUME: Final = 15
+DUTY_STEPS: Final = 8
 DUTY_PATTERNS: Final[tuple[tuple[int, ...], ...]] = (
     (0, 0, 0, 0, 0, 0, 0, 1),  # 12.5% _______-
     (1, 0, 0, 0, 0, 0, 0, 1),  # 25%   -______-
@@ -30,31 +34,82 @@ def main() -> int:
         type=int,
         default=2,
         choices=range(4),
-        help="select between 4 types of duty patterns",
+        help="DMG duty pattern, 0 to 3",
+    )
+    parser.add_argument(
+        "--volume",
+        type=int,
+        default=15,
+        choices=range(16),
+        help="initial volume, 0 to 15",
+    )
+    parser.add_argument(
+        "--pace",
+        type=int,
+        default=0,
+        choices=range(8),
+        help="envelope ticks per volume step, 0 to 7; 0 holds the volume",
+    )
+    parser.add_argument(
+        "--increase",
+        action="store_true",
+        help="make the envelope go up instead of down",
     )
     args = parser.parse_args()
     count: int = round(args.seconds * SAMPLE_RATE)
-    samples = square(frequency=args.frequency, count=count, duty=args.duty)
+    samples = square(
+        frequency=args.frequency,
+        count=count,
+        duty=args.duty,
+        initial_volume=args.volume,
+        increase=args.increase,
+        pace=args.pace,
+    )
     write_wav(path=args.output, samples=samples)
 
     return 0
 
 
-def square(frequency: float, count: int, duty: int = 2) -> list[int]:
+def square(
+    frequency: float,
+    count: int,
+    duty: int = 2,
+    initial_volume: int = 15,
+    increase: bool = False,
+    pace: int = 0,
+) -> list[int]:
     samples: list[int] = []
 
     for i in range(count):
         t = i / SAMPLE_RATE
         phase = (t * frequency) % 1.0
-        step = int(phase * 8)
+        step = int(phase * DUTY_STEPS)
         level = DUTY_PATTERNS[duty][step]
+        volume = volume_at(i, initial_volume, increase, pace)
+        magnitude = round(WAVE_PEAK * volume / MAX_VOLUME)
+
         if level:
-            sample = WAVE_PEAK
+            sample = magnitude
         else:
-            sample = -WAVE_PEAK
+            sample = -magnitude
+
         samples.append(sample)
 
     return samples
+
+
+def volume_at(i: int, start: int, increase: bool, pace: int) -> int:
+    if pace == 0:
+        return start
+
+    elapsed_ticks = i // TICK_SAMPLES
+    offset = elapsed_ticks // pace
+    if increase:
+        volume = start + offset
+    else:
+        volume = start - offset
+
+    return min(max(volume, 0), MAX_VOLUME)
 
 
 def write_wav(path: Path, samples: list[int]) -> None:
