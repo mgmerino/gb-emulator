@@ -70,7 +70,10 @@ something you can run and observe**, never in "trust me, we'll use this later".
 | 14 | Joypad | Play something |
 | 15 | MBC1/MBC3, external RAM, battery saves | Load real, bigger games and keep save files |
 | 16 | Debug tooling: disassembler, tracer, breakpoints | Diff your execution trace against a reference emulator |
-| 17 | APU (optional) | Sound |
+| 17A | Sound from numbers: square waves, duty, envelope, mixing, in `experiments/` | A two-voice melody in a WAV file |
+| 17B | APU: registers, channel 2, the frame sequencer | Tetris's lead voice captured headless to a WAV |
+| 17C | APU: sweep, wave and noise channels, the mixer | All of Tetris's music in a WAV |
+| 17D | Real-time audio in the window | Tetris with sound |
 
 Steps 01–10 are the ones that teach the most. Step 10 is the milestone: a
 passing `cpu_instrs` is the moment the project stops being a toy.
