@@ -20,3 +20,4 @@ them.
 | `frame_to_png.py` | How do you get a viewable image out of the framebuffer, with no dependency? |
 | `boot_logo.py` | How does the Nintendo logo fall, and can the PPU draw it with no CPU at all? |
 | `bench.py` | How fast does the emulator run, and does it still draw the same frame? |
+| `square_wave.py` | How is a sound wave generated from numbers, with the DMG's duty patterns, envelope and pitch? |

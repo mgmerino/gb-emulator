@@ -31,6 +31,7 @@ tour:
 | 13A | [The screen, and the loop turned around](docs/STEP_13A.md) | done |
 | 13B | [Real time: profile, optimise, then pace the frames](docs/STEP_13B.md) | done |
 | 14 | [The joypad](docs/STEP_14.md) | done |
+| 17A | [Sound from numbers: square waves, duty, envelope, mixing](docs/STEP_17A.md) | done |
 
 ## Requirements
 
