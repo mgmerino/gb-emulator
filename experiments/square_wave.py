@@ -1,4 +1,45 @@
-"""How is a sound wave generated from numbers?"""
+"""How is a sound wave generated from numbers?
+
+Step 17A answers it outside the emulator. Every sample is computed with plain
+arithmetic and written to a 16-bit mono WAV at 48000 Hz, using only the
+standard library. Each piece is one the DMG's pulse channels have: the four
+8-step duty patterns, a 4-bit volume, the 64 Hz envelope, pitch written as an
+11-bit period value, and the mixer. Step 17B moves them into the core, clocked
+by the CPU instead of by a sample index.
+
+Run with:
+
+    uv run python experiments/square_wave.py /tmp/la.wav
+    uv run python experiments/square_wave.py /tmp/blip.wav --duty 0 --pace 1
+    uv run python experiments/square_wave.py /tmp/two.wav --melody --bass --duty 1 --pace 2
+
+and listen with `pw-play`, starting with the system volume low.
+
+Sample run (Python 3.12.13):
+
+    wrote /tmp/la.wav   48000 samples   1.00 s at 48000 Hz   peak 8000
+    wrote /tmp/blip.wav   48000 samples   1.00 s at 48000 Hz   peak 8000
+    wrote /tmp/two.wav   48000 samples   1.00 s at 48000 Hz   peak 16000
+
+Things it showed:
+
+1. A sample's index is the time, and its value is where the speaker cone is at
+   that time: `samples[i]` is the wave evaluated at `t = i / SAMPLE_RATE`. The
+   phase is computed from `i` for every sample rather than accumulated, so a
+   long tone does not drift.
+2. Duty 1 (25%) and duty 3 (75%) sound the same. One is the other with every
+   sample negated, and an inverted wave has the same harmonics at the same
+   strengths. Two of them at the same pitch and phase cancel to silence.
+3. The envelope steps are equal in amplitude but not to the ear, which hears
+   ratios. 15 to 14 is -0.6 dB and 2 to 1 is -6 dB, so a slow fade seems to
+   hold and then drop at the end.
+4. 131072 in the pitch formula is `CLOCK_HZ // 4 // DUTY_STEPS`. The period
+   value is an integer, so high notes land further from the pitch they aim at:
+   C5 is 3.4 cents sharp, C8 17.
+5. Mixing is adding. Each voice peaks at 8000 so that two of them fit in 16
+   bits. A sum that does not fit raises `OverflowError` instead of being
+   clamped, on purpose: see `mix`.
+"""
 
 import argparse
 import wave
@@ -209,6 +250,12 @@ def build_melody(
 
 
 def mix(*voices: list[int]) -> list[int]:
+    # Neither mismatch is fixed quietly. Voices of different lengths raise here,
+    # through `strict`. A sum past 16 bits is left as it is, and `array("h")`
+    # raises `OverflowError` in `write_wav`, leaving a 44-byte WAV with no
+    # samples. A mix that does not fit means the peaks were chosen wrong.
+    # Clamping would hide that, and for square waves at equal volumes it would
+    # only scale the wave down.
     return [sum(samples) for samples in zip(*voices, strict=True)]
 
 
