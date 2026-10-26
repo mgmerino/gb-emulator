@@ -8,6 +8,12 @@ from typing import Final
 
 SAMPLE_RATE: Final = 48_000
 WAVE_PEAK: Final = 8_000
+DUTY_PATTERNS: Final[tuple[tuple[int, ...], ...]] = (
+    (0, 0, 0, 0, 0, 0, 0, 1),  # 12.5% _______-
+    (1, 0, 0, 0, 0, 0, 0, 1),  # 25%   -______-
+    (1, 0, 0, 0, 0, 1, 1, 1),  # 50%   -____---
+    (0, 1, 1, 1, 1, 1, 1, 0),  # 75%   _------_
+)
 
 
 def main() -> int:
@@ -19,21 +25,30 @@ def main() -> int:
     parser.add_argument(
         "--seconds", type=float, default=1.0, help="length of the tone, in seconds"
     )
+    parser.add_argument(
+        "--duty",
+        type=int,
+        default=2,
+        choices=range(4),
+        help="select between 4 types of duty patterns",
+    )
     args = parser.parse_args()
     count: int = round(args.seconds * SAMPLE_RATE)
-    samples = square(frequency=args.frequency, count=count)
+    samples = square(frequency=args.frequency, count=count, duty=args.duty)
     write_wav(path=args.output, samples=samples)
 
     return 0
 
 
-def square(frequency: float, count: int) -> list[int]:
+def square(frequency: float, count: int, duty: int = 2) -> list[int]:
     samples: list[int] = []
 
     for i in range(count):
         t = i / SAMPLE_RATE
         phase = (t * frequency) % 1.0
-        if phase < 0.5:
+        step = int(phase * 8)
+        level = DUTY_PATTERNS[duty][step]
+        if level:
             sample = WAVE_PEAK
         else:
             sample = -WAVE_PEAK
