@@ -35,6 +35,11 @@ MELODY: Final[tuple[Note, ...]] = (
     Note(period=1798, length=12000),  # C5 524.29 Hz
 )
 
+BASS: Final[tuple[Note, ...]] = (
+    Note(period=1046, length=24000),  # C3 130.81 Hz
+    Note(period=1379, length=24000),  # G3 195.92 Hz
+)
+
 
 def main() -> int:
     parser = argparse.ArgumentParser(description="Write a square wave to a WAV file.")
@@ -76,8 +81,23 @@ def main() -> int:
         action="store_true",
         help="play the built-in melody instead of a single tone",
     )
+    parser.add_argument(
+        "--bass",
+        action="store_true",
+        help="mix a bass voice under the melody; needs --melody",
+    )
+    parser.add_argument(
+        "--bass-duty",
+        type=int,
+        default=2,
+        choices=range(4),
+        help="DMG duty pattern of the bass, 0 to 3",
+    )
 
     args = parser.parse_args()
+    if args.bass and not args.melody:
+        parser.error("--bass needs --melody")
+
     if args.melody:
         samples = build_melody(
             notes=MELODY,
@@ -86,6 +106,16 @@ def main() -> int:
             increase=args.increase,
             pace=args.pace,
         )
+        # The bass shares the melody's envelope and differs only in its duty
+        if args.bass:
+            bass = build_melody(
+                notes=BASS,
+                duty=args.bass_duty,
+                initial_volume=args.volume,
+                increase=args.increase,
+                pace=args.pace,
+            )
+            samples = mix(samples, bass)
     else:
         count: int = round(args.seconds * SAMPLE_RATE)
         samples = square(
@@ -169,6 +199,10 @@ def build_melody(
         melody.extend(sound_wave)
 
     return melody
+
+
+def mix(*voices: list[int]) -> list[int]:
+    return [sum(samples) for samples in zip(*voices, strict=True)]
 
 
 def write_wav(path: Path, samples: list[int]) -> None:
