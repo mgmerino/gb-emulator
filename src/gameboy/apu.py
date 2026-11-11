@@ -20,11 +20,27 @@
 """
 
 from dataclasses import dataclass, field
-from typing import Self
+from typing import Final, Self
 
 from gameboy import memory_map
 from gameboy.bits import get_bit
-from gameboy.memory_map import NR10, NR11, NR52, WAVE_RAM
+from gameboy.memory_map import (
+    NR10,
+    NR11,
+    NR12,
+    NR14,
+    NR21,
+    NR24,
+    NR30,
+    NR32,
+    NR34,
+    NR41,
+    NR44,
+    NR50,
+    NR51,
+    NR52,
+    WAVE_RAM,
+)
 
 # fmt: off
 MASKS = bytes([
@@ -37,6 +53,25 @@ MASKS = bytes([
 ])
 # fmt: on
 
+# What the boot ROM leaves in the registers, from Pan Docs. NR52 goes first:
+# `write` ignores the rest while the APU is off. The other registers read as 0.
+POST_BOOT: Final = {
+    NR52: 0xF1,
+    NR10: 0x80,
+    NR11: 0xBF,
+    NR12: 0xF3,
+    NR14: 0xBF,
+    NR21: 0x3F,
+    NR24: 0xBF,
+    NR30: 0x7F,
+    NR32: 0x9F,
+    NR34: 0xBF,
+    NR41: 0xFF,
+    NR44: 0xBF,
+    NR50: 0x77,
+    NR51: 0xF3,
+}
+
 
 @dataclass(slots=True)
 class APU:
@@ -46,9 +81,8 @@ class APU:
     @classmethod
     def post_boot(cls) -> Self:
         apu = cls()
-        apu.registers[NR10] = 0x80
-        apu.registers[NR11] = 0xBF
-        # ... añadir los que faltan
+        for address, value in POST_BOOT.items():
+            apu.write(address, value)
 
         return apu
 
