@@ -7,6 +7,7 @@ how far a ROM gets.
 from typing import Protocol, Self, final
 
 from gameboy import bits, interrupts, memory_map
+from gameboy.apu import APU
 from gameboy.interrupts import Interrupt, request
 from gameboy.joypad import Button, Joypad
 from gameboy.ppu import PPU
@@ -23,7 +24,15 @@ class MemoryDevice(Protocol):
 
 @final
 class Bus:
-    def __init__(self, cartridge: MemoryDevice, timer: Timer, ppu: PPU) -> None:
+    def __init__(
+        self,
+        cartridge: MemoryDevice,
+        timer: Timer,
+        ppu: PPU,
+        # `None` rather than `APU()`: a default is built once, when the function
+        # is defined, and every bus would share that one APU.
+        apu: APU | None = None,
+    ) -> None:
         self.cartridge = cartridge
         self.wram = bytearray(0x2000)
         self.hram = bytearray(0x7F)
@@ -32,6 +41,7 @@ class Bus:
         self.i_flag = 0
         self.timer = timer
         self.ppu = ppu
+        self.apu = apu if apu is not None else APU()
         # Constructed rather than injected: unlike the timer and PPU, the serial port
         # and the joypad have no post-boot state a caller could want to choose.
         self.serial = Serial()
@@ -45,7 +55,7 @@ class Bus:
         Nintendo logo. The inject in the constructor stays for tests that need a device
         in an arbitrary state; plain `PPU()` keeps the LCD off and the clock stopped.
         """
-        return cls(cartridge, Timer.post_boot(), PPU.post_boot())
+        return cls(cartridge, Timer.post_boot(), PPU.post_boot(), APU.post_boot())
 
     def read(self, address: int) -> int:
         # `& 0xFFFF` is `bits.u16`, written out: this runs about four times per
@@ -88,6 +98,9 @@ class Bus:
                 return self.read(masked_address - memory_map.ECHO_OFFSET)
             case _ if masked_address in memory_map.OAM:
                 return self.ppu.oam[masked_address - memory_map.OAM.start]
+            # Before IO, which contains the APU's range.
+            case _ if masked_address in memory_map.APU:
+                return self.apu.read(masked_address)
             case _ if masked_address in memory_map.IO:
                 return self.io[masked_address - memory_map.IO.start]
             case _ if masked_address in memory_map.HRAM:
@@ -137,6 +150,9 @@ class Bus:
                 self.write(masked_address - memory_map.ECHO_OFFSET, masked_value)
             case _ if masked_address in memory_map.OAM:
                 self.ppu.oam[masked_address - memory_map.OAM.start] = masked_value
+            # Before IO, which contains the APU's range.
+            case _ if masked_address in memory_map.APU:
+                self.apu.write(masked_address, masked_value)
             case _ if masked_address in memory_map.IO:
                 self.io[masked_address - memory_map.IO.start] = masked_value
             case _ if masked_address in memory_map.HRAM:

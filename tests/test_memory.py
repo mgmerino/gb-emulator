@@ -194,12 +194,11 @@ def test_oam_round_trip(bus: Bus) -> None:
 
 
 def test_io_round_trip(bus: Bus) -> None:
-    # 0xFF10 is sound, which nothing claims yet. 0xFF00 used to stand in for a
-    # generic IO byte and cannot any more: the joypad answers for it.
-    bus.write(0xFF10, 0x76)
+    # 0xFF03 sits between serial and the timer, and no device claims it.
+    bus.write(0xFF03, 0x76)
     bus.write(0xFF7F, 0x67)
 
-    assert bus.read(0xFF10) == 0x76
+    assert bus.read(0xFF03) == 0x76
     assert bus.read(0xFF7F) == 0x67
 
 

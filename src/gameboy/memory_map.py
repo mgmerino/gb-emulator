@@ -27,6 +27,36 @@ ECHO_OFFSET: Final = ECHO_RAM.start - WRAM.start
 OAM: Final = range(0xFE00, 0xFEA0)
 
 PROHIBITED: Final = range(0xFEA0, 0xFF00)
+# APU
+APU: Final = range(0xFF10, 0xFF3F + 1)
+WAVE_RAM: Final = range(0xFF30, 0xFF3F + 1)
+# Channel 1
+NR10: Final = 0xFF10
+NR11: Final = 0xFF11
+NR12: Final = 0xFF12
+NR13: Final = 0xFF13
+NR14: Final = 0xFF14
+# Channel 2 (0xFF15 is unused)
+NR21: Final = 0xFF16
+NR22: Final = 0xFF17
+NR23: Final = 0xFF18
+NR24: Final = 0xFF19
+# Channel 3
+NR30: Final = 0xFF1A
+NR31: Final = 0xFF1B
+NR32: Final = 0xFF1C
+NR33: Final = 0xFF1D
+NR34: Final = 0xFF1E
+# Channel 4 (0xFF1F is unused)
+NR41: Final = 0xFF20
+NR42: Final = 0xFF21
+NR43: Final = 0xFF22
+NR44: Final = 0xFF23
+# Volume, panning, power
+NR50: Final = 0xFF24
+NR51: Final = 0xFF25
+NR52: Final = 0xFF26
+
 IO: Final = range(0xFF00, 0xFF80)
 # Console: high RAM
 HRAM: Final = range(0xFF80, 0xFFFF)
