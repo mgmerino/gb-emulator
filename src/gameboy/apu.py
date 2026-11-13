@@ -122,14 +122,6 @@ class APU:
 
         return get_bit(value, 7)
 
-    @property
-    def channel2_output(self) -> int:
-        if not self.channel2.enabled:
-            return 0
-        bit = DUTY_PATTERNS[self._duty][self.channel2.duty_step]
-
-        return bit * self.channel2.volume
-
     def read(self, address: int) -> int:
         if address in WAVE_RAM:
             return self.wave_ram[address - WAVE_RAM.start]
@@ -164,13 +156,6 @@ class APU:
                 if address == NR24 and get_bit(value, 7):
                     self._trigger_channel2()
 
-    def tick(self, cycles: int) -> None:
-        channel = self.channel2
-        channel.ticks_left -= cycles // 4
-        while channel.ticks_left <= 0:
-            channel.duty_step = (channel.duty_step + 1) % DUTY_STEPS
-            channel.ticks_left += PERIOD_OVERFLOW - self._period
-
     def frame_step(self) -> None:
         # step       0   1   2   3   4   5   6   7
         # length     ●       ●       ●       ●
@@ -184,50 +169,20 @@ class APU:
 
         self.sequencer_step = (self.sequencer_step + 1) % SEQUENCER_STEPS
 
-    @property
-    def _period(self) -> int:
-        mask = 0b0000_0111
-
-        return (self._register(NR24) & mask) << 8 | self._register(NR23)
-
-    @property
-    def _duty(self) -> int:
-        return self._register(NR21) >> 6
-
-    @property
-    def _dac_on(self) -> bool:
-        mask = 0b1111_1000
-
-        return (self._register(NR22) & mask) != 0
-
-    @property
-    def _length_enabled(self) -> bool:
-        mask = 0b0100_0000
-
-        return (self._register(NR24) & mask) != 0
-
-    # NR22 0xFF17   │ 7  6  5  4 │ 3 │ 2  1  0 │
-    #               │ initial vol│dir│  pace   │ dir: 1 = upward,
-    #                                                 0 = downward
-    #                                            pace: 0 = stopped envelope
-    @property
-    def _pace(self) -> int:
-        mask = 0b0000_0111
-
-        return self._register(NR22) & mask
-
-    @property
-    def _volume_upwards(self) -> bool:
-        mask = 0b0000_1000
-
-        return (self._register(NR22) & mask) != 0
-
-    def _clock_length(self) -> None:
+    def tick(self, cycles: int) -> None:
         channel = self.channel2
-        if self._length_enabled and channel.length > 0:
-            channel.length -= 1
-            if channel.length == 0:
-                channel.enabled = False
+        channel.ticks_left -= cycles // 4
+        while channel.ticks_left <= 0:
+            channel.duty_step = (channel.duty_step + 1) % DUTY_STEPS
+            channel.ticks_left += PERIOD_OVERFLOW - self._period
+
+    @property
+    def channel2_output(self) -> int:
+        if not self.channel2.enabled:
+            return 0
+        bit = DUTY_PATTERNS[self._duty][self.channel2.duty_step]
+
+        return bit * self.channel2.volume
 
     def _clock_envelope(self) -> None:
         if self._pace == 0:
@@ -241,6 +196,13 @@ class APU:
             else:
                 channel.volume = max(channel.volume - 1, 0)
 
+    def _clock_length(self) -> None:
+        channel = self.channel2
+        if self._length_enabled and channel.length > 0:
+            channel.length -= 1
+            if channel.length == 0:
+                channel.enabled = False
+
     def _trigger_channel2(self) -> None:
         channel = self.channel2
         channel.enabled = self._dac_on
@@ -249,6 +211,44 @@ class APU:
         channel.envelope_timer = self._pace
         if channel.length == 0:
             channel.length = MAX_LENGTH
+
+    @property
+    def _duty(self) -> int:
+        return self._register(NR21) >> 6
+
+    # NR22 0xFF17   │ 7  6  5  4 │ 3 │ 2  1  0 │
+    #               │ initial vol│dir│  pace   │ dir: 1 = upward,
+    #                                                 0 = downward
+    #                                            pace: 0 = stopped envelope
+    @property
+    def _dac_on(self) -> bool:
+        mask = 0b1111_1000
+
+        return (self._register(NR22) & mask) != 0
+
+    @property
+    def _pace(self) -> int:
+        mask = 0b0000_0111
+
+        return self._register(NR22) & mask
+
+    @property
+    def _volume_upwards(self) -> bool:
+        mask = 0b0000_1000
+
+        return (self._register(NR22) & mask) != 0
+
+    @property
+    def _length_enabled(self) -> bool:
+        mask = 0b0100_0000
+
+        return (self._register(NR24) & mask) != 0
+
+    @property
+    def _period(self) -> int:
+        mask = 0b0000_0111
+
+        return (self._register(NR24) & mask) << 8 | self._register(NR23)
 
     def _register(self, address: int) -> int:
         return self.registers[address - memory_map.APU.start]
