@@ -61,6 +61,15 @@ DUTY_PATTERNS: Final[tuple[tuple[int, ...], ...]] = (
     (1, 0, 0, 0, 0, 1, 1, 1),  # 50%   -____---
     (0, 1, 1, 1, 1, 1, 1, 0),  # 75%   _------_
 )
+DUTY_STEPS: Final = 8
+
+# The period divider counts up from the period and reloads when it reaches 2048.
+PERIOD_OVERFLOW: Final = 2048
+MAX_LENGTH: Final = 64
+MAX_VOLUME: Final = 15
+
+SEQUENCER_STEPS: Final = 8
+ENVELOPE_STEP: Final = 7
 
 # What the boot ROM leaves in the registers, from Pan Docs. NR52 goes first:
 # `write` ignores the rest while the APU is off. The other registers read as 0.
@@ -149,7 +158,7 @@ class APU:
                 self._write_to_apu_register(address, value)
                 if address == NR21:
                     mask = 0b0011_1111
-                    self.channel2.length = 64 - (value & mask)
+                    self.channel2.length = MAX_LENGTH - (value & mask)
                 if address == NR22 and not self._dac_on:
                     self.channel2.enabled = False
                 if address == NR24 and get_bit(value, 7):
@@ -159,8 +168,8 @@ class APU:
         channel = self.channel2
         channel.ticks_left -= cycles // 4
         while channel.ticks_left <= 0:
-            channel.duty_step = (channel.duty_step + 1) % 8
-            channel.ticks_left += 2048 - self._period
+            channel.duty_step = (channel.duty_step + 1) % DUTY_STEPS
+            channel.ticks_left += PERIOD_OVERFLOW - self._period
 
     def frame_step(self) -> None:
         # step       0   1   2   3   4   5   6   7
@@ -170,10 +179,10 @@ class APU:
         if self.sequencer_step % 2 == 0:
             self._clock_length()
 
-        if self.sequencer_step == 7:
+        if self.sequencer_step == ENVELOPE_STEP:
             self._clock_envelope()
 
-        self.sequencer_step = (self.sequencer_step + 1) % 8
+        self.sequencer_step = (self.sequencer_step + 1) % SEQUENCER_STEPS
 
     @property
     def _period(self) -> int:
@@ -203,11 +212,15 @@ class APU:
     #                                            pace: 0 = stopped envelope
     @property
     def _pace(self) -> int:
-        return self._register(NR22) & 0b0000_0111
+        mask = 0b0000_0111
+
+        return self._register(NR22) & mask
 
     @property
     def _volume_upwards(self) -> bool:
-        return self._register(NR22) & 0b0000_1000 != 0
+        mask = 0b0000_1000
+
+        return (self._register(NR22) & mask) != 0
 
     def _clock_length(self) -> None:
         channel = self.channel2
@@ -224,18 +237,18 @@ class APU:
         if channel.envelope_timer == 0:
             channel.envelope_timer = self._pace
             if self._volume_upwards:
-                channel.volume = min(channel.volume + 1, 15)
+                channel.volume = min(channel.volume + 1, MAX_VOLUME)
             else:
                 channel.volume = max(channel.volume - 1, 0)
 
     def _trigger_channel2(self) -> None:
         channel = self.channel2
         channel.enabled = self._dac_on
-        channel.ticks_left = 2048 - self._period
+        channel.ticks_left = PERIOD_OVERFLOW - self._period
         channel.volume = self._register(NR22) >> 4
         channel.envelope_timer = self._pace
         if channel.length == 0:
-            channel.length = 64
+            channel.length = MAX_LENGTH
 
     def _register(self, address: int) -> int:
         return self.registers[address - memory_map.APU.start]
