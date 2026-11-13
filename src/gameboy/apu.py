@@ -153,6 +153,16 @@ class APU:
                     self._trigger_channel2()
 
 
+    def tick(self, cycles: int) -> None:
+        channel = self.channel2
+        channel.ticks_left -= cycles // 4
+        while channel.ticks_left <= 0:
+            if channel.duty_step == 7:
+                channel.duty_step = 0
+            else:
+                channel.duty_step += 1
+            channel.ticks_left += 2048 - self._period
+    
     def _register(self, address: int) -> int:
         return self.registers[address - memory_map.APU.start]
 
