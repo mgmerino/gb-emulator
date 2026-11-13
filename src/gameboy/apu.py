@@ -55,6 +55,13 @@ MASKS = bytes([
 ])
 # fmt: on
 
+DUTY_PATTERNS: Final[tuple[tuple[int, ...], ...]] = (
+    (0, 0, 0, 0, 0, 0, 0, 1),  # 12.5% _______-
+    (1, 0, 0, 0, 0, 0, 0, 1),  # 25%   -______-
+    (1, 0, 0, 0, 0, 1, 1, 1),  # 50%   -____---
+    (0, 1, 1, 1, 1, 1, 1, 0),  # 75%   _------_
+)
+
 # What the boot ROM leaves in the registers, from Pan Docs. NR52 goes first:
 # `write` ignores the rest while the APU is off. The other registers read as 0.
 POST_BOOT: Final = {
@@ -104,26 +111,12 @@ class APU:
         return get_bit(value, 7)
 
     @property
-    def _period(self) -> int:
-        mask = 0b00000111
+    def channel2_output(self) -> int:
+        if not self.channel2.enabled:
+            return 0
+        bit = DUTY_PATTERNS[self._duty][self.channel2.duty_step]
 
-        return (self._register(NR24) & mask) << 8 | self._register(NR23)
-
-    @property
-    def _duty(self) -> int:
-        return self._register(NR21) >> 6
-
-    @property
-    def _dac_on(self) -> bool:
-        mask = 0b11111000
-
-        return (self._register(NR22) & mask) != 0
-    
-    def _trigger_channel2(self) -> None:
-        channel = self.channel2
-        channel.enabled = self._dac_on
-        channel.ticks_left = 2048 - self._period
-        channel.volume = self._register(NR22) >> 4
+        return bit * self.channel2.volume
 
     def read(self, address: int) -> int:
         if address in WAVE_RAM:
@@ -152,7 +145,6 @@ class APU:
                 if address == NR24 and get_bit(value, 7):
                     self._trigger_channel2()
 
-
     def tick(self, cycles: int) -> None:
         channel = self.channel2
         channel.ticks_left -= cycles // 4
@@ -162,7 +154,29 @@ class APU:
             else:
                 channel.duty_step += 1
             channel.ticks_left += 2048 - self._period
-    
+
+    @property
+    def _period(self) -> int:
+        mask = 0b00000111
+
+        return (self._register(NR24) & mask) << 8 | self._register(NR23)
+
+    @property
+    def _duty(self) -> int:
+        return self._register(NR21) >> 6
+
+    @property
+    def _dac_on(self) -> bool:
+        mask = 0b11111000
+
+        return (self._register(NR22) & mask) != 0
+
+    def _trigger_channel2(self) -> None:
+        channel = self.channel2
+        channel.enabled = self._dac_on
+        channel.ticks_left = 2048 - self._period
+        channel.volume = self._register(NR22) >> 4
+
     def _register(self, address: int) -> int:
         return self.registers[address - memory_map.APU.start]
 
