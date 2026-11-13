@@ -30,6 +30,8 @@ from gameboy.memory_map import (
     NR12,
     NR14,
     NR21,
+    NR22,
+    NR23,
     NR24,
     NR30,
     NR32,
@@ -53,6 +55,13 @@ MASKS = bytes([
 ])
 # fmt: on
 
+DUTY_PATTERNS: Final[tuple[tuple[int, ...], ...]] = (
+    (0, 0, 0, 0, 0, 0, 0, 1),  # 12.5% _______-
+    (1, 0, 0, 0, 0, 0, 0, 1),  # 25%   -______-
+    (1, 0, 0, 0, 0, 1, 1, 1),  # 50%   -____---
+    (0, 1, 1, 1, 1, 1, 1, 0),  # 75%   _------_
+)
+
 # What the boot ROM leaves in the registers, from Pan Docs. NR52 goes first:
 # `write` ignores the rest while the APU is off. The other registers read as 0.
 POST_BOOT: Final = {
@@ -74,9 +83,18 @@ POST_BOOT: Final = {
 
 
 @dataclass(slots=True)
+class PulseChannel:
+    enabled: bool = False
+    duty_step: int = 0
+    ticks_left: int = 0
+    volume: int = 0
+
+
+@dataclass(slots=True)
 class APU:
     registers: bytearray = field(default_factory=lambda: bytearray(0x20))
     wave_ram: bytearray = field(default_factory=lambda: bytearray(16))
+    channel2: PulseChannel = field(default_factory=PulseChannel)
 
     @classmethod
     def post_boot(cls) -> Self:
@@ -92,12 +110,23 @@ class APU:
 
         return get_bit(value, 7)
 
+    @property
+    def channel2_output(self) -> int:
+        if not self.channel2.enabled:
+            return 0
+        bit = DUTY_PATTERNS[self._duty][self.channel2.duty_step]
+
+        return bit * self.channel2.volume
+
     def read(self, address: int) -> int:
         if address in WAVE_RAM:
             return self.wave_ram[address - WAVE_RAM.start]
 
         index = address - memory_map.APU.start
         masked = self.registers[index] | MASKS[index]
+        if address == NR52:
+            # Bits 3-0 are not stored, only signal which channels are on.
+            return masked | int(self.channel2.enabled) << 1
 
         return masked
 
@@ -106,13 +135,56 @@ class APU:
             self.wave_ram[address - WAVE_RAM.start] = value
         elif address == NR52:
             masked = value & 0b1000_0000
+            # switch off the APU
             if not get_bit(masked, 7):
                 self.registers[0:0x16] = bytes(0x16)
+                self.channel2 = PulseChannel()
 
             self._write_to_apu_register(address, masked)
+
         else:
             if self.powered:
                 self._write_to_apu_register(address, value)
+
+                if address == NR22 and not self._dac_on:
+                    self.channel2.enabled = False
+                if address == NR24 and get_bit(value, 7):
+                    self._trigger_channel2()
+
+    def tick(self, cycles: int) -> None:
+        channel = self.channel2
+        channel.ticks_left -= cycles // 4
+        while channel.ticks_left <= 0:
+            if channel.duty_step == 7:
+                channel.duty_step = 0
+            else:
+                channel.duty_step += 1
+            channel.ticks_left += 2048 - self._period
+
+    @property
+    def _period(self) -> int:
+        mask = 0b00000111
+
+        return (self._register(NR24) & mask) << 8 | self._register(NR23)
+
+    @property
+    def _duty(self) -> int:
+        return self._register(NR21) >> 6
+
+    @property
+    def _dac_on(self) -> bool:
+        mask = 0b11111000
+
+        return (self._register(NR22) & mask) != 0
+
+    def _trigger_channel2(self) -> None:
+        channel = self.channel2
+        channel.enabled = self._dac_on
+        channel.ticks_left = 2048 - self._period
+        channel.volume = self._register(NR22) >> 4
+
+    def _register(self, address: int) -> int:
+        return self.registers[address - memory_map.APU.start]
 
     def _write_to_apu_register(self, address: int, value: int) -> None:
         self.registers[address - memory_map.APU.start] = value

@@ -175,6 +175,8 @@ class Bus:
         for interrupt in self.ppu.tick(cycles):
             interrupts.request(self, interrupt)
 
+        self.apu.tick(cycles)
+
     def read16(self, address: int) -> int:
         return bits.join_bytes(self.read(address + 1), self.read(address))
 
