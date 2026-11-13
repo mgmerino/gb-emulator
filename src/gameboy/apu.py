@@ -88,6 +88,7 @@ class PulseChannel:
     duty_step: int = 0
     ticks_left: int = 0
     volume: int = 0
+    length: int = 0
 
 
 @dataclass(slots=True)
@@ -144,6 +145,9 @@ class APU:
         else:
             if self.powered:
                 self._write_to_apu_register(address, value)
+                if address == NR21:
+                    mask = 0b0011_1111
+                    self.channel2.length = 64 - (value & mask)
                 if address == NR22 and not self._dac_on:
                     self.channel2.enabled = False
                 if address == NR24 and get_bit(value, 7):
@@ -172,11 +176,26 @@ class APU:
 
         return (self._register(NR22) & mask) != 0
 
+    @property
+    def _length_enabled(self) -> bool:
+        mask = 0b0100_0000
+
+        return (self._register(NR24) & mask) != 0
+
+    def _clock_length(self) -> None:
+        channel = self.channel2
+        if self._length_enabled and channel.length > 0:
+            channel.length -= 1
+            if channel.length == 0:
+                channel.enabled = False
+
     def _trigger_channel2(self) -> None:
         channel = self.channel2
         channel.enabled = self._dac_on
         channel.ticks_left = 2048 - self._period
         channel.volume = self._register(NR22) >> 4
+        if channel.length == 0:
+            channel.length = 64
 
     def _register(self, address: int) -> int:
         return self.registers[address - memory_map.APU.start]
