@@ -124,6 +124,9 @@ class APU:
 
         index = address - memory_map.APU.start
         masked = self.registers[index] | MASKS[index]
+        if address == NR52:
+            # Bits 3-0 are not stored, only signal which channels are on.
+            return masked | int(self.channel2.enabled) << 1
 
         return masked
 
