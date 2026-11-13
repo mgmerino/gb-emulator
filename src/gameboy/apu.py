@@ -117,7 +117,13 @@ class APU:
     def _dac_on(self) -> bool:
         mask = 0b11111000
 
-        return (self._register(NR22) & mask) == 1
+        return (self._register(NR22) & mask) != 0
+    
+    def _trigger_channel2(self) -> None:
+        channel = self.channel2
+        channel.enabled = self._dac_on
+        channel.ticks_left = 2048 - self._period
+        channel.volume = self._register(NR22) >> 4
 
     def read(self, address: int) -> int:
         if address in WAVE_RAM:
@@ -140,6 +146,12 @@ class APU:
         else:
             if self.powered:
                 self._write_to_apu_register(address, value)
+
+                if address == NR22 and not self._dac_on:
+                    self.channel2.enabled = False
+                if address == NR24 and get_bit(value, 7):
+                    self._trigger_channel2()
+
 
     def _register(self, address: int) -> int:
         return self.registers[address - memory_map.APU.start]
