@@ -116,6 +116,8 @@ class APU:
 
         return apu
 
+    # --- The bus side ---
+
     @property
     def powered(self) -> bool:
         value = self.registers[NR52 - memory_map.APU.start]
@@ -156,6 +158,8 @@ class APU:
                 if address == NR24 and get_bit(value, 7):
                     self._trigger_channel2()
 
+    # --- Time ---
+
     def frame_step(self) -> None:
         # step       0   1   2   3   4   5   6   7
         # length     ●       ●       ●       ●
@@ -176,6 +180,8 @@ class APU:
             channel.duty_step = (channel.duty_step + 1) % DUTY_STEPS
             channel.ticks_left += PERIOD_OVERFLOW - self._period
 
+    # --- Output ---
+
     @property
     def channel2_output(self) -> int:
         if not self.channel2.enabled:
@@ -183,6 +189,8 @@ class APU:
         bit = DUTY_PATTERNS[self._duty][self.channel2.duty_step]
 
         return bit * self.channel2.volume
+
+    # --- Channel 2 events ---
 
     def _clock_envelope(self) -> None:
         if self._pace == 0:
@@ -212,9 +220,13 @@ class APU:
         if channel.length == 0:
             channel.length = MAX_LENGTH
 
+    # --- NR21 ---
+
     @property
     def _duty(self) -> int:
         return self._register(NR21) >> 6
+
+    # --- NR22 ---
 
     # NR22 0xFF17   │ 7  6  5  4 │ 3 │ 2  1  0 │
     #               │ initial vol│dir│  pace   │ dir: 1 = upward,
@@ -238,6 +250,8 @@ class APU:
 
         return (self._register(NR22) & mask) != 0
 
+    # --- NR23/NR24 ---
+
     @property
     def _length_enabled(self) -> bool:
         mask = 0b0100_0000
@@ -249,6 +263,8 @@ class APU:
         mask = 0b0000_0111
 
         return (self._register(NR24) & mask) << 8 | self._register(NR23)
+
+    # --- Raw register bytes ---
 
     def _register(self, address: int) -> int:
         return self.registers[address - memory_map.APU.start]
