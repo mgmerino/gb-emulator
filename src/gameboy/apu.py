@@ -89,6 +89,7 @@ class PulseChannel:
     ticks_left: int = 0
     volume: int = 0
     length: int = 0
+    envelope_timer: int = 0
 
 
 @dataclass(slots=True)
@@ -182,6 +183,18 @@ class APU:
 
         return (self._register(NR24) & mask) != 0
 
+    # NR22 0xFF17   │ 7  6  5  4 │ 3 │ 2  1  0 │
+    #               │ initial vol│dir│  pace   │ dir: 1 = upward,
+    #                                                 0 = downward
+    #                                            pace: 0 = stopped envelope
+    @property
+    def _pace(self) -> int:
+        return self._register(NR22) & 0b0000_0111
+
+    @property
+    def _volume_upwards(self) -> bool:
+        return self._register(NR22) & 0b0000_1000 != 0
+
     def _clock_length(self) -> None:
         channel = self.channel2
         if self._length_enabled and channel.length > 0:
@@ -189,11 +202,24 @@ class APU:
             if channel.length == 0:
                 channel.enabled = False
 
+    def _clock_envelope(self) -> None:
+        if self._pace == 0:
+            return
+        channel = self.channel2
+        channel.envelope_timer -= 1
+        if channel.envelope_timer == 0:
+            channel.envelope_timer = self._pace
+            if self._volume_upwards:
+                channel.volume = min(channel.volume + 1, 15)
+            else:
+                channel.volume = max(channel.volume - 1, 0)
+
     def _trigger_channel2(self) -> None:
         channel = self.channel2
         channel.enabled = self._dac_on
         channel.ticks_left = 2048 - self._period
         channel.volume = self._register(NR22) >> 4
+        channel.envelope_timer = self._pace
         if channel.length == 0:
             channel.length = 64
 
