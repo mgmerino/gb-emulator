@@ -135,10 +135,13 @@ class APU:
             self.wave_ram[address - WAVE_RAM.start] = value
         elif address == NR52:
             masked = value & 0b1000_0000
+            # switch off the APU
             if not get_bit(masked, 7):
                 self.registers[0:0x16] = bytes(0x16)
+                self.channel2 = PulseChannel()
 
             self._write_to_apu_register(address, masked)
+
         else:
             if self.powered:
                 self._write_to_apu_register(address, value)
