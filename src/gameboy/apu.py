@@ -141,11 +141,9 @@ class APU:
                 self.channel2 = PulseChannel()
 
             self._write_to_apu_register(address, masked)
-
         else:
             if self.powered:
                 self._write_to_apu_register(address, value)
-
                 if address == NR22 and not self._dac_on:
                     self.channel2.enabled = False
                 if address == NR24 and get_bit(value, 7):
@@ -155,10 +153,7 @@ class APU:
         channel = self.channel2
         channel.ticks_left -= cycles // 4
         while channel.ticks_left <= 0:
-            if channel.duty_step == 7:
-                channel.duty_step = 0
-            else:
-                channel.duty_step += 1
+            channel.duty_step = (channel.duty_step + 1) % 8
             channel.ticks_left += 2048 - self._period
 
     @property
