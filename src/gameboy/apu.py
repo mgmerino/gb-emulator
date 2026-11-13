@@ -158,7 +158,7 @@ class APU:
 
     @property
     def _period(self) -> int:
-        mask = 0b00000111
+        mask = 0b0000_0111
 
         return (self._register(NR24) & mask) << 8 | self._register(NR23)
 
@@ -168,7 +168,7 @@ class APU:
 
     @property
     def _dac_on(self) -> bool:
-        mask = 0b11111000
+        mask = 0b1111_1000
 
         return (self._register(NR22) & mask) != 0
 
