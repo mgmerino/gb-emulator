@@ -30,6 +30,8 @@ from gameboy.memory_map import (
     NR12,
     NR14,
     NR21,
+    NR22,
+    NR23,
     NR24,
     NR30,
     NR32,
@@ -74,9 +76,18 @@ POST_BOOT: Final = {
 
 
 @dataclass(slots=True)
+class PulseChannel:
+    enabled: bool = False
+    duty_step: int = 0
+    ticks_left: int = 0
+    volume: int = 0
+
+
+@dataclass(slots=True)
 class APU:
     registers: bytearray = field(default_factory=lambda: bytearray(0x20))
     wave_ram: bytearray = field(default_factory=lambda: bytearray(16))
+    channel2: PulseChannel = field(default_factory=PulseChannel)
 
     @classmethod
     def post_boot(cls) -> Self:
@@ -91,6 +102,22 @@ class APU:
         value = self.registers[NR52 - memory_map.APU.start]
 
         return get_bit(value, 7)
+
+    @property
+    def _period(self) -> int:
+        mask = 0b00000111
+
+        return (self._register(NR24) & mask) << 8 | self._register(NR23)
+
+    @property
+    def _duty(self) -> int:
+        return self._register(NR21) >> 6
+
+    @property
+    def _dac_on(self) -> bool:
+        mask = 0b11111000
+
+        return (self._register(NR22) & mask) == 1
 
     def read(self, address: int) -> int:
         if address in WAVE_RAM:
@@ -113,6 +140,9 @@ class APU:
         else:
             if self.powered:
                 self._write_to_apu_register(address, value)
+
+    def _register(self, address: int) -> int:
+        return self.registers[address - memory_map.APU.start]
 
     def _write_to_apu_register(self, address: int, value: int) -> None:
         self.registers[address - memory_map.APU.start] = value
