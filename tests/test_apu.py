@@ -361,3 +361,144 @@ def test_bus_tick_drives_the_apu(bus: Bus) -> None:
     bus.tick(1192)
 
     assert bus.apu.channel2.duty_step == 1
+
+
+# --- frame sequencer ---
+
+LENGTH_ENABLE = 0x40  # NR24 bit 6
+
+
+def frame_steps(apu: APU, count: int) -> None:
+    for _ in range(count):
+        apu.frame_step()
+
+
+def test_sequencer_wraps_after_step_7(apu: APU) -> None:
+    frame_steps(apu, 8)
+
+    assert apu.sequencer_step == 0
+
+
+# --- channel 2: length ---
+
+
+def test_nr21_loads_the_length(apu: APU) -> None:
+    apu.write(NR21, 0x20)
+
+    assert apu.channel2.length == 32
+
+
+def test_length_runs_out_on_the_first_clock(apu: APU) -> None:
+    apu.write(NR21, 0x3F)
+    apu.write(NR22, DAC_ON)
+    apu.write(NR24, TRIGGER | LENGTH_ENABLE)
+
+    apu.frame_step()
+
+    assert not apu.channel2.enabled
+    assert apu.channel2.length == 0
+
+
+def test_length_does_nothing_unless_enabled(apu: APU) -> None:
+    apu.write(NR21, 0x3F)
+    apu.write(NR22, DAC_ON)
+    apu.write(NR24, TRIGGER)
+
+    frame_steps(apu, 200)
+
+    assert apu.channel2.enabled
+    assert apu.channel2.length == 1
+
+
+def test_length_clocks_on_even_steps_only(apu: APU) -> None:
+    apu.write(NR21, 0x3E)
+    apu.write(NR22, DAC_ON)
+    apu.write(NR24, TRIGGER | LENGTH_ENABLE)
+
+    frame_steps(apu, 2)
+    assert apu.channel2.enabled
+
+    apu.frame_step()
+    assert not apu.channel2.enabled
+
+
+def test_trigger_reloads_an_empty_length_with_64(apu: APU) -> None:
+    apu.write(NR21, 0x3F)
+    apu.write(NR22, DAC_ON)
+    apu.write(NR24, TRIGGER | LENGTH_ENABLE)
+    apu.frame_step()
+
+    apu.write(NR24, TRIGGER | LENGTH_ENABLE)
+
+    assert apu.channel2.enabled
+    assert apu.channel2.length == 64
+
+
+def test_trigger_keeps_a_running_length(apu: APU) -> None:
+    apu.write(NR21, 0x20)
+    apu.write(NR22, DAC_ON)
+
+    apu.write(NR24, TRIGGER)
+
+    assert apu.channel2.length == 32
+
+
+# --- channel 2: envelope ---
+
+
+def test_envelope_reaches_zero_after_120_frame_steps(apu: APU) -> None:
+    apu.write(NR22, 0xF1)  # volume 15, down, pace 1
+    apu.write(NR24, TRIGGER)
+
+    frame_steps(apu, 119)
+    assert apu.channel2.volume == 1
+
+    apu.frame_step()
+    assert apu.channel2.volume == 0
+    assert apu.channel2.enabled
+
+
+def test_envelope_goes_up_and_stops_at_15(apu: APU) -> None:
+    apu.write(NR22, 0x09)  # volume 0, up, pace 1
+    apu.write(NR24, TRIGGER)
+
+    frame_steps(apu, 200)
+
+    assert apu.channel2.volume == 15
+
+
+def test_envelope_stops_at_0(apu: APU) -> None:
+    apu.write(NR22, 0x11)  # volume 1, down, pace 1
+    apu.write(NR24, TRIGGER)
+
+    frame_steps(apu, 200)
+
+    assert apu.channel2.volume == 0
+
+
+def test_envelope_pace_3_steps_every_24_frame_steps(apu: APU) -> None:
+    apu.write(NR22, 0xF3)
+    apu.write(NR24, TRIGGER)
+
+    frame_steps(apu, 23)
+    assert apu.channel2.volume == 15
+
+    apu.frame_step()
+    assert apu.channel2.volume == 14
+
+
+def test_trigger_restarts_the_envelope(apu: APU) -> None:
+    apu.write(NR22, 0xF3)
+    apu.write(NR24, TRIGGER)
+    frame_steps(apu, 16)  # two clocks: timer at 1
+
+    apu.write(NR24, TRIGGER)
+    frame_steps(apu, 8)
+
+    assert apu.channel2.volume == 15
+
+
+def test_pace_0_keeps_the_volume(playing: APU) -> None:
+    frame_steps(playing, 200)
+
+    assert playing.channel2.volume == 15
