@@ -97,6 +97,7 @@ class APU:
     registers: bytearray = field(default_factory=lambda: bytearray(0x20))
     wave_ram: bytearray = field(default_factory=lambda: bytearray(16))
     channel2: PulseChannel = field(default_factory=PulseChannel)
+    sequencer_step: int = 0
 
     @classmethod
     def post_boot(cls) -> Self:
@@ -160,6 +161,19 @@ class APU:
         while channel.ticks_left <= 0:
             channel.duty_step = (channel.duty_step + 1) % 8
             channel.ticks_left += 2048 - self._period
+
+    def frame_step(self) -> None:
+        # step       0   1   2   3   4   5   6   7
+        # length     ●       ●       ●       ●
+        # envelope                               ●
+
+        if self.sequencer_step % 2 == 0:
+            self._clock_length()
+
+        if self.sequencer_step == 7:
+            self._clock_envelope()
+
+        self.sequencer_step = (self.sequencer_step + 1) % 8
 
     @property
     def _period(self) -> int:
