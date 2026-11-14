@@ -120,8 +120,16 @@ class Bus:
             ):
                 return self.cartridge.write(masked_address, masked_value)
             case _ if masked_address in memory_map.TIMER_REGISTERS:
+                # check falling edge in sequencer bit
+                seq_bit_before = self._sequencer_bit()
+
                 if self.timer.write(masked_address, masked_value):
                     request(self, Interrupt.TIMER)
+
+                seq_bit_after = self._sequencer_bit()
+                if seq_bit_before and not seq_bit_after:
+                    self.apu.frame_step()
+
             case _ if masked_address in memory_map.SERIAL_REGISTERS:
                 self.serial.write(masked_address, masked_value)
             case memory_map.JOYPAD:
