@@ -170,12 +170,12 @@ class Bus:
 
     def tick(self, cycles: int) -> None:
         """Broadcast the elapsed time to the devices connected to the bus."""
-        seq_bit_before = bits.get_bit(self.timer.counter, _SEQUENCER_BIT)
+        seq_bit_before = self._sequencer_bit()
 
         if self.timer.tick(cycles):
             interrupts.request(self, Interrupt.TIMER)
 
-        seq_bit_after = bits.get_bit(self.timer.counter, _SEQUENCER_BIT)
+        seq_bit_after = self._sequencer_bit()
 
         if seq_bit_before and not seq_bit_after:
             self.apu.frame_step()
@@ -191,3 +191,6 @@ class Bus:
     def write16(self, address: int, value: int) -> None:
         self.write(address, bits.low_byte(value))
         self.write(address + 1, bits.high_byte(value))
+
+    def _sequencer_bit(self) -> bool:
+        return bits.get_bit(self.timer.counter, _SEQUENCER_BIT)
