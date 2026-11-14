@@ -4,7 +4,7 @@ crashes the emulator instead of degrading it, and we lose the ability to see
 how far a ROM gets.
 """
 
-from typing import Protocol, Self, final
+from typing import Final, Protocol, Self, final
 
 from gameboy import bits, interrupts, memory_map
 from gameboy.apu import APU
@@ -13,6 +13,8 @@ from gameboy.joypad import Button, Joypad
 from gameboy.ppu import PPU
 from gameboy.serial import Serial
 from gameboy.timer import Timer
+
+_SEQUENCER_BIT: Final = 12  # bit 4 of DIV
 
 
 class MemoryDevice(Protocol):
@@ -168,12 +170,20 @@ class Bus:
 
     def tick(self, cycles: int) -> None:
         """Broadcast the elapsed time to the devices connected to the bus."""
+        seq_bit_before = bits.get_bit(self.timer.counter, _SEQUENCER_BIT)
+
         if self.timer.tick(cycles):
             interrupts.request(self, Interrupt.TIMER)
-        for interrupt in self.ppu.tick(cycles):
-            interrupts.request(self, interrupt)
+
+        seq_bit_after = bits.get_bit(self.timer.counter, _SEQUENCER_BIT)
+
+        if seq_bit_before and not seq_bit_after:
+            self.apu.frame_step()
 
         self.apu.tick(cycles)
+
+        for interrupt in self.ppu.tick(cycles):
+            interrupts.request(self, interrupt)
 
     def read16(self, address: int) -> int:
         return bits.join_bytes(self.read(address + 1), self.read(address))
