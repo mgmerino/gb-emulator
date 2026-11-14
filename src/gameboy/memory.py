@@ -29,8 +29,6 @@ class Bus:
         cartridge: MemoryDevice,
         timer: Timer,
         ppu: PPU,
-        # `None` rather than `APU()`: a default is built once, when the function
-        # is defined, and every bus would share that one APU.
         apu: APU | None = None,
     ) -> None:
         self.cartridge = cartridge
@@ -42,8 +40,8 @@ class Bus:
         self.timer = timer
         self.ppu = ppu
         self.apu = apu if apu is not None else APU()
-        # Constructed rather than injected: unlike the timer and PPU, the serial port
-        # and the joypad have no post-boot state a caller could want to choose.
+        # Unlike the timer and PPU, the serial port and the joypad have no
+        # post-boot state a caller would need to choose.
         self.serial = Serial()
         self.joypad = Joypad()
 
@@ -58,8 +56,8 @@ class Bus:
         return cls(cartridge, Timer.post_boot(), PPU.post_boot(), APU.post_boot())
 
     def read(self, address: int) -> int:
-        # `& 0xFFFF` is `bits.u16`, written out: this runs about four times per
-        # instruction, and the call would cost more than the AND.
+        # This runs about four times per instruction, so use the mask
+        # instead of calling bits.u16, which costs more.
         masked_address = address & 0xFFFF
         # Dispatch on the region. Order the branches by how often the CPU hits
         # them, as `experiments/bench.py --profile` measures it.
@@ -132,9 +130,9 @@ class Bus:
             ):
                 self.ppu.write(masked_address, masked_value)
             case memory_map.DMA:
-                # 160 bytes from anywhere in the map into OAM, in one pass and
-                # for no cycles. Read through `self.read`, because the source
-                # can be ROM, WRAM or echo RAM and only the bus reaches those.
+                # copies 160 bytes into OAM, in one pass and no cycles. Reads
+                # through `self.read`, because the source can be ROM, WRAM or
+                # echo RAM and only the bus reaches those.
                 # `ppu.oam` starts at 0xFE00, so one offset indexes both sides.
                 source = masked_value << 8
                 for offset in range(len(memory_map.OAM)):
@@ -169,7 +167,7 @@ class Bus:
             request(self, Interrupt.JOYPAD)
 
     def tick(self, cycles: int) -> None:
-        """Fan the elapsed time out to the devices hanging off the bus."""
+        """Broadcast the elapsed time to the devices connected to the bus."""
         if self.timer.tick(cycles):
             interrupts.request(self, Interrupt.TIMER)
         for interrupt in self.ppu.tick(cycles):
