@@ -145,6 +145,9 @@ class APU:
             if not get_bit(masked, 7):
                 self.registers[0:0x16] = bytes(0x16)
                 self.channel2 = PulseChannel()
+                # not 100% accurate, hardware quirck on poweroff are ignored
+                # for now
+                self.sequencer_step = 0
 
             self._write_to_apu_register(address, masked)
         else:

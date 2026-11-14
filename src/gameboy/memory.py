@@ -4,7 +4,7 @@ crashes the emulator instead of degrading it, and we lose the ability to see
 how far a ROM gets.
 """
 
-from typing import Protocol, Self, final
+from typing import Final, Protocol, Self, final
 
 from gameboy import bits, interrupts, memory_map
 from gameboy.apu import APU
@@ -13,6 +13,8 @@ from gameboy.joypad import Button, Joypad
 from gameboy.ppu import PPU
 from gameboy.serial import Serial
 from gameboy.timer import Timer
+
+_SEQUENCER_BIT: Final = 12  # bit 4 of DIV
 
 
 class MemoryDevice(Protocol):
@@ -29,8 +31,6 @@ class Bus:
         cartridge: MemoryDevice,
         timer: Timer,
         ppu: PPU,
-        # `None` rather than `APU()`: a default is built once, when the function
-        # is defined, and every bus would share that one APU.
         apu: APU | None = None,
     ) -> None:
         self.cartridge = cartridge
@@ -42,8 +42,8 @@ class Bus:
         self.timer = timer
         self.ppu = ppu
         self.apu = apu if apu is not None else APU()
-        # Constructed rather than injected: unlike the timer and PPU, the serial port
-        # and the joypad have no post-boot state a caller could want to choose.
+        # Unlike the timer and PPU, the serial port and the joypad have no
+        # post-boot state a caller would need to choose.
         self.serial = Serial()
         self.joypad = Joypad()
 
@@ -58,8 +58,8 @@ class Bus:
         return cls(cartridge, Timer.post_boot(), PPU.post_boot(), APU.post_boot())
 
     def read(self, address: int) -> int:
-        # `& 0xFFFF` is `bits.u16`, written out: this runs about four times per
-        # instruction, and the call would cost more than the AND.
+        # This runs about four times per instruction, so use the mask
+        # instead of calling bits.u16, which costs more.
         masked_address = address & 0xFFFF
         # Dispatch on the region. Order the branches by how often the CPU hits
         # them, as `experiments/bench.py --profile` measures it.
@@ -120,8 +120,16 @@ class Bus:
             ):
                 return self.cartridge.write(masked_address, masked_value)
             case _ if masked_address in memory_map.TIMER_REGISTERS:
+                # check falling edge in sequencer bit
+                seq_bit_before = self._sequencer_bit()
+
                 if self.timer.write(masked_address, masked_value):
                     request(self, Interrupt.TIMER)
+
+                seq_bit_after = self._sequencer_bit()
+                if seq_bit_before and not seq_bit_after:
+                    self.apu.frame_step()
+
             case _ if masked_address in memory_map.SERIAL_REGISTERS:
                 self.serial.write(masked_address, masked_value)
             case memory_map.JOYPAD:
@@ -132,9 +140,9 @@ class Bus:
             ):
                 self.ppu.write(masked_address, masked_value)
             case memory_map.DMA:
-                # 160 bytes from anywhere in the map into OAM, in one pass and
-                # for no cycles. Read through `self.read`, because the source
-                # can be ROM, WRAM or echo RAM and only the bus reaches those.
+                # copies 160 bytes into OAM, in one pass and no cycles. Reads
+                # through `self.read`, because the source can be ROM, WRAM or
+                # echo RAM and only the bus reaches those.
                 # `ppu.oam` starts at 0xFE00, so one offset indexes both sides.
                 source = masked_value << 8
                 for offset in range(len(memory_map.OAM)):
@@ -169,13 +177,21 @@ class Bus:
             request(self, Interrupt.JOYPAD)
 
     def tick(self, cycles: int) -> None:
-        """Fan the elapsed time out to the devices hanging off the bus."""
+        """Broadcast the elapsed time to the devices connected to the bus."""
+        seq_bit_before = self._sequencer_bit()
+
         if self.timer.tick(cycles):
             interrupts.request(self, Interrupt.TIMER)
-        for interrupt in self.ppu.tick(cycles):
-            interrupts.request(self, interrupt)
+
+        seq_bit_after = self._sequencer_bit()
+
+        if seq_bit_before and not seq_bit_after:
+            self.apu.frame_step()
 
         self.apu.tick(cycles)
+
+        for interrupt in self.ppu.tick(cycles):
+            interrupts.request(self, interrupt)
 
     def read16(self, address: int) -> int:
         return bits.join_bytes(self.read(address + 1), self.read(address))
@@ -183,3 +199,6 @@ class Bus:
     def write16(self, address: int, value: int) -> None:
         self.write(address, bits.low_byte(value))
         self.write(address + 1, bits.high_byte(value))
+
+    def _sequencer_bit(self) -> bool:
+        return bits.get_bit(self.timer.counter, _SEQUENCER_BIT)

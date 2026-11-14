@@ -15,6 +15,10 @@ NR51 = 0xFF25
 NR52 = 0xFF26
 WAVE_START = 0xFF30
 WAVE_END = 0xFF3F
+DIV = 0xFF04
+TIMA = 0xFF05
+TMA = 0xFF06
+TAC = 0xFF07
 
 POWER_ON = 0x80
 
@@ -379,6 +383,14 @@ def test_sequencer_wraps_after_step_7(apu: APU) -> None:
     assert apu.sequencer_step == 0
 
 
+def test_power_off_resets_the_sequencer(apu: APU) -> None:
+    frame_steps(apu, 3)
+
+    apu.write(NR52, 0x00)
+
+    assert apu.sequencer_step == 0
+
+
 # --- channel 2: length ---
 
 
@@ -502,3 +514,81 @@ def test_pace_0_keeps_the_volume(playing: APU) -> None:
     frame_steps(playing, 200)
 
     assert playing.channel2.volume == 15
+
+
+# --- frame sequencer: on the bus ---
+
+BIT_12_HALF_PERIOD = 4096  # T-cycles between two changes of counter bit 12
+
+
+def test_bus_steps_the_sequencer_512_times_a_second(
+    bus: Bus, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    calls = 0
+
+    def count(self: APU) -> None:
+        nonlocal calls
+        calls += 1
+
+    monkeypatch.setattr(APU, "frame_step", count)
+    bus.write(NR52, POWER_ON)
+
+    for _ in range(1024):
+        bus.tick(BIT_12_HALF_PERIOD)
+
+    assert calls == 512
+
+
+def test_bit_12_rising_does_not_step_the_sequencer(bus: Bus) -> None:
+    bus.write(NR52, POWER_ON)
+
+    bus.tick(BIT_12_HALF_PERIOD)
+
+    assert bus.apu.sequencer_step == 0
+
+
+def test_bit_12_falling_steps_the_sequencer(bus: Bus) -> None:
+    bus.write(NR52, POWER_ON)
+
+    bus.tick(BIT_12_HALF_PERIOD)
+    bus.tick(BIT_12_HALF_PERIOD)
+
+    assert bus.apu.sequencer_step == 1
+
+
+def test_one_second_of_bus_runs_the_envelope_down(bus: Bus) -> None:
+    bus.write(NR52, POWER_ON)
+    bus.write(NR22, 0xF1)  # volume 15, down, pace 1
+    bus.write(NR24, TRIGGER)
+
+    for _ in range(1024):
+        bus.tick(BIT_12_HALF_PERIOD)
+
+    assert bus.apu.channel2.volume == 0
+
+
+def test_writing_div_with_bit_12_set_steps_the_sequencer(bus: Bus) -> None:
+    bus.write(NR52, POWER_ON)
+    bus.tick(BIT_12_HALF_PERIOD)
+
+    bus.write(DIV, 0x00)
+
+    assert bus.apu.sequencer_step == 1
+
+
+def test_writing_div_with_bit_12_clear_does_not_step(bus: Bus) -> None:
+    bus.write(NR52, POWER_ON)
+
+    bus.write(DIV, 0x00)
+
+    assert bus.apu.sequencer_step == 0
+
+
+@pytest.mark.parametrize("address", [TIMA, TMA, TAC])
+def test_other_timer_writes_do_not_step(bus: Bus, address: int) -> None:
+    bus.write(NR52, POWER_ON)
+    bus.tick(BIT_12_HALF_PERIOD)
+
+    bus.write(address, 0x00)
+
+    assert bus.apu.sequencer_step == 0

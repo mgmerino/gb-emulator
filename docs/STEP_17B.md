@@ -274,8 +274,8 @@ instant, and it lets frequencies above 24000 Hz fold back into the audible range
    Bus.read/write 0xFF10–0xFF3F ──► Apu.read / Apu.write
    Bus.tick(cycles)
      ├─► timer.tick     ── did counter bit 12 fall? ──► apu.frame_step()
-     ├─► ppu.tick
-     └─► apu.tick(cycles) ──► divider, duty step, samples
+     ├─► apu.tick(cycles) ──► divider, duty step, samples
+     └─► ppu.tick
 ```
 
 The bus is the only object that sees both the timer and the APU, so it detects
