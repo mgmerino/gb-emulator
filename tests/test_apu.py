@@ -15,6 +15,10 @@ NR51 = 0xFF25
 NR52 = 0xFF26
 WAVE_START = 0xFF30
 WAVE_END = 0xFF3F
+DIV = 0xFF04
+TIMA = 0xFF05
+TMA = 0xFF06
+TAC = 0xFF07
 
 POWER_ON = 0x80
 
@@ -379,6 +383,14 @@ def test_sequencer_wraps_after_step_7(apu: APU) -> None:
     assert apu.sequencer_step == 0
 
 
+def test_power_off_resets_the_sequencer(apu: APU) -> None:
+    frame_steps(apu, 3)
+
+    apu.write(NR52, 0x00)
+
+    assert apu.sequencer_step == 0
+
+
 # --- channel 2: length ---
 
 
@@ -553,3 +565,30 @@ def test_one_second_of_bus_runs_the_envelope_down(bus: Bus) -> None:
         bus.tick(BIT_12_HALF_PERIOD)
 
     assert bus.apu.channel2.volume == 0
+
+
+def test_writing_div_with_bit_12_set_steps_the_sequencer(bus: Bus) -> None:
+    bus.write(NR52, POWER_ON)
+    bus.tick(BIT_12_HALF_PERIOD)
+
+    bus.write(DIV, 0x00)
+
+    assert bus.apu.sequencer_step == 1
+
+
+def test_writing_div_with_bit_12_clear_does_not_step(bus: Bus) -> None:
+    bus.write(NR52, POWER_ON)
+
+    bus.write(DIV, 0x00)
+
+    assert bus.apu.sequencer_step == 0
+
+
+@pytest.mark.parametrize("address", [TIMA, TMA, TAC])
+def test_other_timer_writes_do_not_step(bus: Bus, address: int) -> None:
+    bus.write(NR52, POWER_ON)
+    bus.tick(BIT_12_HALF_PERIOD)
+
+    bus.write(address, 0x00)
+
+    assert bus.apu.sequencer_step == 0
