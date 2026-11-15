@@ -213,11 +213,18 @@ class APU:
         ch_out = self.channel2_output
         return CHANNEL_PEAK * (MAX_VOLUME - 2 * ch_out) // MAX_VOLUME
 
+    def take_samples(self) -> array[int]:
+        samples = self.samples
+        self.samples = array("h")
+
+        return samples
+
     # --- Channel 2 events ---
 
     def _clock_envelope(self) -> None:
         if self._pace == 0:
             return
+
         channel = self.channel2
         channel.envelope_timer -= 1
         if channel.envelope_timer == 0:
