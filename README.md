@@ -149,6 +149,21 @@ screen; the title screen arrives around frame 600.
 `experiments/frame_to_png.py` does the same thing as a PNG, and its docstring
 explains why the CLI ships the simpler format.
 
+With `--audio`, the same run also writes its sound to a WAV file, mono, 16-bit,
+48000 Hz:
+
+```
+uv run python -O -m gameboy path/to/TETRIS.gb --frame 1800 --budget 12000000 --audio tetris.wav
+```
+
+```
+wrote tetris.wav: 30.34 s of audio
+```
+
+Without `--out`, the last frame still prints as text after that line. Only
+channel 2 sounds so far. In Tetris that is the top voice of the title demo's
+music, which starts at about 8.6 seconds.
+
 Play a ROM in a window. The window needs pygame, which is an optional extra, so
 the emulator and its tests still install nothing:
 
