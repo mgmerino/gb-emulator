@@ -2,6 +2,8 @@
 
 import argparse
 import sys
+import wave
+from array import array
 from collections.abc import Iterator
 from itertools import batched
 from pathlib import Path
@@ -28,6 +30,7 @@ HEX_WIDTH = BYTES_PER_ROW * 3 - 1 + 1
 NAME_WIDTH = 12
 # Two hex digits per byte and a separator: a prefixed opcode prints as "CB 7E".
 OPCODE_WIDTH = 5
+SAMPLE_RATE = 48_000
 
 
 def format_size(size: int) -> str:
@@ -209,6 +212,16 @@ def render_frames(cpu: CPU, bus: Bus, frames: int, budget: int) -> bool:
     return all(run_frame(cpu, bus, budget) for _ in range(frames))
 
 
+def write_wav(path: Path, samples: array[int]) -> None:
+    with wave.open(str(path), "wb") as sound_file:
+        sound_file.setnchannels(1)  # mono
+        sound_file.setsampwidth(2)  # 2 bytes per sample, 16 bits
+        sound_file.setframerate(SAMPLE_RATE)
+
+        frames = samples.tobytes()
+        sound_file.writeframes(frames)
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(
         prog="gameboy", description="Inspect a Game Boy cartridge."
@@ -240,6 +253,12 @@ def main() -> int:
         type=int,
         default=FRAME_CYCLES * 4,
         help="with --frame, the T-cycles to spend on one frame before giving up",
+    )
+    parser.add_argument(
+        "--audio",
+        type=Path,
+        default=None,
+        help="with --frame, write the sound as mono 16-bit 48000 Hz WAV here",
     )
     args = parser.parse_args()
 
@@ -314,7 +333,9 @@ def main() -> int:
                 file=sys.stderr,
             )
             return 1
-
+        if args.audio is not None:
+            samples = bus.apu.take_samples()
+            write_wav(args.audio, samples)
         if args.out is not None:
             args.out.write_bytes(frame_as_pgm(bus.ppu.frame))
             print(f"wrote {args.out} after {bus.ppu.frames} frames")
