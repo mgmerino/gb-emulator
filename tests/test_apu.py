@@ -653,3 +653,35 @@ def test_samples_keep_coming_while_powered_off() -> None:
         apu.tick(4096)
 
     assert set(apu.samples) == {0}
+
+
+def test_take_samples_returns_the_buffer(apu: APU) -> None:
+    apu.tick(FRAME)
+
+    assert len(apu.take_samples()) == 803
+
+
+def test_take_samples_leaves_an_empty_buffer(apu: APU) -> None:
+    apu.tick(FRAME)
+
+    apu.take_samples()
+
+    assert len(apu.samples) == 0
+
+
+def test_taken_samples_do_not_change(apu: APU) -> None:
+    apu.tick(FRAME)
+    taken = apu.take_samples()
+
+    apu.tick(FRAME)
+
+    assert len(taken) == 803
+
+
+def test_take_samples_keeps_the_accumulator(apu: APU) -> None:
+    apu.tick(FRAME)
+    apu.take_samples()
+
+    apu.tick(FRAME)
+
+    assert len(apu.samples) == 804
