@@ -19,6 +19,7 @@
                 (duty) env.   low    trigger
 """
 
+from array import array
 from dataclasses import dataclass, field
 from typing import Final, Self
 
@@ -71,6 +72,10 @@ MAX_VOLUME: Final = 15
 SEQUENCER_STEPS: Final = 8
 ENVELOPE_STEP: Final = 7
 
+SAMPLE_RATE: Final = 48_000
+CHANNEL_PEAK: Final = 8_000
+CLOCK_HZ: Final = 4_194_304
+
 # What the boot ROM leaves in the registers, from Pan Docs. NR52 goes first:
 # `write` ignores the rest while the APU is off. The other registers read as 0.
 POST_BOOT: Final = {
@@ -107,6 +112,8 @@ class APU:
     wave_ram: bytearray = field(default_factory=lambda: bytearray(16))
     channel2: PulseChannel = field(default_factory=PulseChannel)
     sequencer_step: int = 0
+    samples: array[int] = field(default_factory=lambda: array("h"))
+    sample_acc: int = 0
 
     @classmethod
     def post_boot(cls) -> Self:
@@ -183,6 +190,11 @@ class APU:
             channel.duty_step = (channel.duty_step + 1) % DUTY_STEPS
             channel.ticks_left += PERIOD_OVERFLOW - self._period
 
+        self.sample_acc += cycles * SAMPLE_RATE
+        while self.sample_acc >= CLOCK_HZ:
+            self.sample_acc -= CLOCK_HZ
+            self.samples.append(self.channel2_sample)
+
     # --- Output ---
 
     @property
@@ -192,6 +204,14 @@ class APU:
         bit = DUTY_PATTERNS[self._duty][self.channel2.duty_step]
 
         return bit * self.channel2.volume
+
+    @property
+    def channel2_sample(self) -> int:
+        if not self._dac_on:
+            return 0
+
+        ch_out = self.channel2_output
+        return CHANNEL_PEAK * (MAX_VOLUME - 2 * ch_out) // MAX_VOLUME
 
     # --- Channel 2 events ---
 
