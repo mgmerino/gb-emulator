@@ -336,6 +336,8 @@ def main() -> int:
         if args.audio is not None:
             samples = bus.apu.take_samples()
             write_wav(args.audio, samples)
+            seconds = len(samples) / SAMPLE_RATE
+            print(f"wrote {args.audio}: {seconds:.2f} s of audio")
         if args.out is not None:
             args.out.write_bytes(frame_as_pgm(bus.ppu.frame))
             print(f"wrote {args.out} after {bus.ppu.frames} frames")
