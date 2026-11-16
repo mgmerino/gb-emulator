@@ -592,3 +592,96 @@ def test_other_timer_writes_do_not_step(bus: Bus, address: int) -> None:
     bus.write(address, 0x00)
 
     assert bus.apu.sequencer_step == 0
+
+
+# --- samples ---
+
+ONE_SECOND = 4_194_304
+FRAME = 70_224
+
+
+def test_dac_off_gives_zero(apu: APU) -> None:
+    assert apu.channel2_sample == 0
+
+
+def test_dac_on_at_volume_0_gives_the_peak(apu: APU) -> None:
+    apu.write(NR22, 0x08)  # volume 0, up
+    apu.write(NR24, TRIGGER)
+
+    assert apu.channel2_sample == 8000
+
+
+def test_full_volume_high_gives_minus_the_peak(playing: APU) -> None:
+    assert playing.channel2.duty_step == 0  # duty 2: 1 0 0 0 0 1 1 1
+
+    assert playing.channel2_sample == -8000
+
+
+def test_full_volume_low_gives_the_peak(playing: APU) -> None:
+    playing.tick(1192)  # one duty step at period 1750
+
+    assert playing.channel2_sample == 8000
+
+
+def test_one_second_gives_48000_samples(apu: APU) -> None:
+    for _ in range(ONE_SECOND // 4096):
+        apu.tick(4096)
+
+    assert len(apu.samples) == 48000
+
+
+def test_frames_alternate_803_and_804(apu: APU) -> None:
+    apu.tick(FRAME)
+    assert len(apu.samples) == 803
+
+    apu.tick(FRAME)
+    assert len(apu.samples) == 803 + 804
+
+
+def test_instruction_sized_ticks_do_not_drift(apu: APU) -> None:
+    for _ in range(ONE_SECOND // 32):
+        apu.tick(12)
+        apu.tick(20)
+
+    assert len(apu.samples) == 48000
+
+
+def test_samples_keep_coming_while_powered_off() -> None:
+    apu = APU()
+
+    for _ in range(10):
+        apu.tick(4096)
+
+    assert set(apu.samples) == {0}
+
+
+def test_take_samples_returns_the_buffer(apu: APU) -> None:
+    apu.tick(FRAME)
+
+    assert len(apu.take_samples()) == 803
+
+
+def test_take_samples_leaves_an_empty_buffer(apu: APU) -> None:
+    apu.tick(FRAME)
+
+    apu.take_samples()
+
+    assert len(apu.samples) == 0
+
+
+def test_taken_samples_do_not_change(apu: APU) -> None:
+    apu.tick(FRAME)
+    taken = apu.take_samples()
+
+    apu.tick(FRAME)
+
+    assert len(taken) == 803
+
+
+def test_take_samples_keeps_the_accumulator(apu: APU) -> None:
+    apu.tick(FRAME)
+    apu.take_samples()
+
+    apu.tick(FRAME)
+
+    assert len(apu.samples) == 804

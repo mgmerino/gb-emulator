@@ -124,6 +124,14 @@ def test_the_loop_presents_one_frame_per_run_frame(spinning: Cartridge) -> None:
     assert bus.ppu.frames == 3
 
 
+def test_the_loop_drains_the_samples(spinning: Cartridge) -> None:
+    cpu, bus = machine(spinning, lcd_on=True)
+
+    run(FakeDisplay(frames=3), cpu, bus)
+
+    assert len(bus.apu.samples) <= 804  # one frame's worth at most
+
+
 def test_the_seam_carries_a_whole_framebuffer(spinning: Cartridge) -> None:
     cpu, bus = machine(spinning, lcd_on=True)
     display = FakeDisplay(frames=1)

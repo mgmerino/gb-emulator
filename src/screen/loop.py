@@ -146,6 +146,9 @@ def run(
             if run_frame(cpu, bus, budget):
                 rate.tick()
 
+            # discards samples until sound output is implemented
+            bus.apu.take_samples()
+
             display.present(bus.ppu.frame)
 
             if pacer is not None:
