@@ -30,9 +30,8 @@ from gameboy.memory_map import (
     NR11,
     NR12,
     NR14,
+    NR20,
     NR21,
-    NR22,
-    NR23,
     NR24,
     NR30,
     NR32,
@@ -55,6 +54,14 @@ MASKS = bytes([
     *[0xFF] * 9                    # 0xFF27–0xFF2F
 ])
 # fmt: on
+
+# Each channel access to five registers through a memoryview, using an offeset.
+# Pan Docs names them NRx0 to NRx4, with x the channel number.
+NRX0: Final = 0
+NRX1: Final = 1
+NRX2: Final = 2
+NRX3: Final = 3
+NRX4: Final = 4
 
 DUTY_PATTERNS: Final[tuple[tuple[int, ...], ...]] = (
     (0, 0, 0, 0, 0, 0, 0, 1),  # 12.5% _______-
@@ -98,6 +105,7 @@ POST_BOOT: Final = {
 
 @dataclass(slots=True)
 class PulseChannel:
+    regs: memoryview
     enabled: bool = False
     duty_step: int = 0
     ticks_left: int = 0
@@ -105,15 +113,119 @@ class PulseChannel:
     length: int = 0
     envelope_timer: int = 0
 
+    @property
+    def output(self) -> int:
+        if not self.enabled:
+            return 0
+        bit = DUTY_PATTERNS[self._duty][self.duty_step]
+
+        return bit * self.volume
+
+    @property
+    def sample(self) -> int:
+        if not self.dac_on:
+            return 0
+
+        ch_out = self.output
+        return CHANNEL_PEAK * (MAX_VOLUME - 2 * ch_out) // MAX_VOLUME
+
+    # --- Events ---
+
+    def clock_envelope(self) -> None:
+        if self._pace == 0:
+            return
+
+        self.envelope_timer -= 1
+        if self.envelope_timer == 0:
+            self.envelope_timer = self._pace
+            if self._volume_upwards:
+                self.volume = min(self.volume + 1, MAX_VOLUME)
+            else:
+                self.volume = max(self.volume - 1, 0)
+
+    def clock_length(self) -> None:
+        if self._length_enabled and self.length > 0:
+            self.length -= 1
+            if self.length == 0:
+                self.enabled = False
+
+    def on_write(self, offset: int, value: int) -> None:
+        if offset == NRX1:
+            mask = 0b0011_1111
+            self.length = MAX_LENGTH - (value & mask)
+        if offset == NRX2 and not self.dac_on:
+            self.enabled = False
+        if offset == NRX4 and get_bit(value, 7):
+            self.trigger()
+
+    def tick(self, cycles: int) -> None:
+        self.ticks_left -= cycles // 4
+        while self.ticks_left <= 0:
+            self.duty_step = (self.duty_step + 1) % DUTY_STEPS
+            self.ticks_left += PERIOD_OVERFLOW - self.period
+
+    def trigger(self) -> None:
+        self.enabled = self.dac_on
+        self.ticks_left = PERIOD_OVERFLOW - self.period
+        self.volume = self.regs[NRX2] >> 4
+        self.envelope_timer = self._pace
+        if self.length == 0:
+            self.length = MAX_LENGTH
+
+    # --- NRX1 ---
+
+    @property
+    def _duty(self) -> int:
+        return self.regs[NRX1] >> 6
+
+    # NRX2 │ 7  6  5  4 │ 3 │ 2  1  0 │
+    #      │ initial vol│dir│  pace   │ dir: 1 = upward,
+    #                                        0 = downward
+    #                                  pace: 0 = stopped envelope
+    @property
+    def dac_on(self) -> bool:
+        mask = 0b1111_1000
+
+        return (self.regs[NRX2] & mask) != 0
+
+    @property
+    def _pace(self) -> int:
+        mask = 0b0000_0111
+
+        return self.regs[NRX2] & mask
+
+    @property
+    def _volume_upwards(self) -> bool:
+        mask = 0b0000_1000
+
+        return (self.regs[NRX2] & mask) != 0
+
+    # --- NRX3/NRX4 ---
+
+    @property
+    def _length_enabled(self) -> bool:
+        mask = 0b0100_0000
+
+        return (self.regs[NRX4] & mask) != 0
+
+    @property
+    def period(self) -> int:
+        mask = 0b0000_0111
+
+        return (self.regs[NRX4] & mask) << 8 | self.regs[NRX3]
+
 
 @dataclass(slots=True)
 class APU:
     registers: bytearray = field(default_factory=lambda: bytearray(0x20))
     wave_ram: bytearray = field(default_factory=lambda: bytearray(16))
-    channel2: PulseChannel = field(default_factory=PulseChannel)
+    channel2: PulseChannel = field(init=False)
     sequencer_step: int = 0
     samples: array[int] = field(default_factory=lambda: array("h"))
     sample_acc: int = 0
+
+    def __post_init__(self) -> None:
+        self.channel2 = PulseChannel(self._channel_regs(NR20))
 
     @classmethod
     def post_boot(cls) -> Self:
@@ -151,7 +263,7 @@ class APU:
             # switch off the APU
             if not get_bit(masked, 7):
                 self.registers[0:0x16] = bytes(0x16)
-                self.channel2 = PulseChannel()
+                self.channel2 = PulseChannel(self.channel2.regs)
                 # not 100% accurate, hardware quirck on poweroff are ignored
                 # for now
                 self.sequencer_step = 0
@@ -160,13 +272,8 @@ class APU:
         else:
             if self.powered:
                 self._write_to_apu_register(address, value)
-                if address == NR21:
-                    mask = 0b0011_1111
-                    self.channel2.length = MAX_LENGTH - (value & mask)
-                if address == NR22 and not self._dac_on:
-                    self.channel2.enabled = False
-                if address == NR24 and get_bit(value, 7):
-                    self._trigger_channel2()
+                if NR21 <= address <= NR24:
+                    self.channel2.on_write(address - NR20, value)
 
     # --- Time ---
 
@@ -176,42 +283,21 @@ class APU:
         # envelope                               ●
 
         if self.sequencer_step % 2 == 0:
-            self._clock_length()
+            self.channel2.clock_length()
 
         if self.sequencer_step == ENVELOPE_STEP:
-            self._clock_envelope()
+            self.channel2.clock_envelope()
 
         self.sequencer_step = (self.sequencer_step + 1) % SEQUENCER_STEPS
 
     def tick(self, cycles: int) -> None:
-        channel = self.channel2
-        channel.ticks_left -= cycles // 4
-        while channel.ticks_left <= 0:
-            channel.duty_step = (channel.duty_step + 1) % DUTY_STEPS
-            channel.ticks_left += PERIOD_OVERFLOW - self._period
-
+        self.channel2.tick(cycles)
         self.sample_acc += cycles * SAMPLE_RATE
         while self.sample_acc >= CLOCK_HZ:
             self.sample_acc -= CLOCK_HZ
-            self.samples.append(self.channel2_sample)
+            self.samples.append(self.channel2.sample)
 
     # --- Output ---
-
-    @property
-    def channel2_output(self) -> int:
-        if not self.channel2.enabled:
-            return 0
-        bit = DUTY_PATTERNS[self._duty][self.channel2.duty_step]
-
-        return bit * self.channel2.volume
-
-    @property
-    def channel2_sample(self) -> int:
-        if not self._dac_on:
-            return 0
-
-        ch_out = self.channel2_output
-        return CHANNEL_PEAK * (MAX_VOLUME - 2 * ch_out) // MAX_VOLUME
 
     def take_samples(self) -> array[int]:
         samples = self.samples
@@ -219,85 +305,20 @@ class APU:
 
         return samples
 
-    # --- Channel 2 events ---
+    def _channel_regs(self, base: int) -> memoryview:
+        i = base - memory_map.APU.start
+        return memoryview(self.registers)[i : i + 5]
 
-    def _clock_envelope(self) -> None:
-        if self._pace == 0:
-            return
-
-        channel = self.channel2
-        channel.envelope_timer -= 1
-        if channel.envelope_timer == 0:
-            channel.envelope_timer = self._pace
-            if self._volume_upwards:
-                channel.volume = min(channel.volume + 1, MAX_VOLUME)
-            else:
-                channel.volume = max(channel.volume - 1, 0)
-
-    def _clock_length(self) -> None:
-        channel = self.channel2
-        if self._length_enabled and channel.length > 0:
-            channel.length -= 1
-            if channel.length == 0:
-                channel.enabled = False
-
-    def _trigger_channel2(self) -> None:
-        channel = self.channel2
-        channel.enabled = self._dac_on
-        channel.ticks_left = PERIOD_OVERFLOW - self._period
-        channel.volume = self._register(NR22) >> 4
-        channel.envelope_timer = self._pace
-        if channel.length == 0:
-            channel.length = MAX_LENGTH
-
-    # --- NR21 ---
+    # --- Channel 2 ---
+    @property
+    def channel2_output(self) -> int:
+        return self.channel2.output
 
     @property
-    def _duty(self) -> int:
-        return self._register(NR21) >> 6
-
-    # --- NR22 ---
-
-    # NR22 0xFF17   │ 7  6  5  4 │ 3 │ 2  1  0 │
-    #               │ initial vol│dir│  pace   │ dir: 1 = upward,
-    #                                                 0 = downward
-    #                                            pace: 0 = stopped envelope
-    @property
-    def _dac_on(self) -> bool:
-        mask = 0b1111_1000
-
-        return (self._register(NR22) & mask) != 0
-
-    @property
-    def _pace(self) -> int:
-        mask = 0b0000_0111
-
-        return self._register(NR22) & mask
-
-    @property
-    def _volume_upwards(self) -> bool:
-        mask = 0b0000_1000
-
-        return (self._register(NR22) & mask) != 0
-
-    # --- NR23/NR24 ---
-
-    @property
-    def _length_enabled(self) -> bool:
-        mask = 0b0100_0000
-
-        return (self._register(NR24) & mask) != 0
-
-    @property
-    def _period(self) -> int:
-        mask = 0b0000_0111
-
-        return (self._register(NR24) & mask) << 8 | self._register(NR23)
+    def channel2_sample(self) -> int:
+        return self.channel2.sample
 
     # --- Raw register bytes ---
-
-    def _register(self, address: int) -> int:
-        return self.registers[address - memory_map.APU.start]
 
     def _write_to_apu_register(self, address: int, value: int) -> None:
         self.registers[address - memory_map.APU.start] = value
