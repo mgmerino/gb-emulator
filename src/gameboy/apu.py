@@ -219,6 +219,7 @@ class PulseChannel:
 class APU:
     registers: bytearray = field(default_factory=lambda: bytearray(0x20))
     wave_ram: bytearray = field(default_factory=lambda: bytearray(16))
+    channel1: PulseChannel = field(init=False)
     channel2: PulseChannel = field(init=False)
     sequencer_step: int = 0
     samples: array[int] = field(default_factory=lambda: array("h"))
@@ -226,6 +227,7 @@ class APU:
 
     def __post_init__(self) -> None:
         self.channel2 = PulseChannel(self._channel_regs(NR20))
+        self.channel1 = PulseChannel(self._channel_regs(NR10))
 
     @classmethod
     def post_boot(cls) -> Self:
@@ -251,7 +253,7 @@ class APU:
         masked = self.registers[index] | MASKS[index]
         if address == NR52:
             # Bits 3-0 are not stored, only signal which channels are on.
-            return masked | int(self.channel2.enabled) << 1
+            return masked | int(self.channel1.enabled) | int(self.channel2.enabled) << 1
 
         return masked
 
@@ -264,6 +266,7 @@ class APU:
             if not get_bit(masked, 7):
                 self.registers[0:0x16] = bytes(0x16)
                 self.channel2 = PulseChannel(self.channel2.regs)
+                self.channel1 = PulseChannel(self.channel1.regs)
                 # not 100% accurate, hardware quirck on poweroff are ignored
                 # for now
                 self.sequencer_step = 0
@@ -272,7 +275,9 @@ class APU:
         else:
             if self.powered:
                 self._write_to_apu_register(address, value)
-                if NR21 <= address <= NR24:
+                if NR10 <= address <= NR14:
+                    self.channel1.on_write(address - NR10, value)
+                elif NR21 <= address <= NR24:
                     self.channel2.on_write(address - NR20, value)
 
     # --- Time ---
@@ -283,19 +288,23 @@ class APU:
         # envelope                               ●
 
         if self.sequencer_step % 2 == 0:
+            self.channel1.clock_length()
             self.channel2.clock_length()
 
         if self.sequencer_step == ENVELOPE_STEP:
+            self.channel1.clock_envelope()
             self.channel2.clock_envelope()
 
         self.sequencer_step = (self.sequencer_step + 1) % SEQUENCER_STEPS
 
     def tick(self, cycles: int) -> None:
+        self.channel1.tick(cycles)
         self.channel2.tick(cycles)
         self.sample_acc += cycles * SAMPLE_RATE
         while self.sample_acc >= CLOCK_HZ:
             self.sample_acc -= CLOCK_HZ
-            self.samples.append(self.channel2.sample)
+            sum_sample = self.channel1.sample + self.channel2.sample
+            self.samples.append(sum_sample)
 
     # --- Output ---
 

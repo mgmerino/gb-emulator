@@ -6,6 +6,9 @@ from gameboy.memory import Bus
 
 NR10 = 0xFF10
 NR11 = 0xFF11
+NR12 = 0xFF12
+NR13 = 0xFF13
+NR14 = 0xFF14
 NR21 = 0xFF16
 NR22 = 0xFF17
 NR23 = 0xFF18
@@ -151,8 +154,7 @@ def test_nr52_is_writable_while_powered_off() -> None:
         (NR11, 0xBF),
         (NR50, 0x77),
         (NR51, 0xF3),
-        # The boot ROM leaves channel 1 on, but channels do not exist until 17C.
-        (NR52, 0xF0),
+        (NR52, 0xF1),
     ],
 )
 def test_post_boot_values(address: int, expected: int) -> None:
@@ -685,3 +687,83 @@ def test_take_samples_keeps_the_accumulator(apu: APU) -> None:
     apu.tick(FRAME)
 
     assert len(apu.samples) == 804
+
+
+# --- channel 1 ---
+
+
+def set_period1(apu: APU, period: int, *, trigger: bool = False) -> None:
+    apu.write(NR13, period & 0xFF)
+    apu.write(NR14, (TRIGGER if trigger else 0) | period >> 8)
+
+
+@pytest.fixture
+def pulse1(apu: APU) -> APU:
+    """Channel 1 just triggered: duty 2, volume 15, period 1750, no sweep."""
+    apu.write(NR11, DUTY_50)
+    apu.write(NR12, DAC_ON)
+    set_period1(apu, 1750, trigger=True)
+    return apu
+
+
+def test_channel1_duty_step_takes_1192_cycles(pulse1: APU) -> None:
+    pulse1.tick(1192)
+
+    assert pulse1.channel1.duty_step == 1
+
+
+def test_channel1_trigger_sets_nr52_bit_0(pulse1: APU) -> None:
+    assert pulse1.read(NR52) == 0xF1
+
+
+def test_channel1_dac_off_turns_it_off(pulse1: APU) -> None:
+    pulse1.write(NR12, 0x00)
+
+    assert not pulse1.channel1.enabled
+    assert pulse1.read(NR52) == 0xF0
+
+
+def test_channel1_length_runs_out(apu: APU) -> None:
+    apu.write(NR11, 0x3F)  # length 1
+    apu.write(NR12, DAC_ON)
+    apu.write(NR14, TRIGGER | LENGTH_ENABLE)
+
+    apu.frame_step()
+
+    assert not apu.channel1.enabled
+
+
+def test_channel1_envelope_reaches_zero(apu: APU) -> None:
+    apu.write(NR12, 0xF1)  # volume 15, down, pace 1
+    apu.write(NR14, TRIGGER)
+
+    frame_steps(apu, 120)
+
+    assert apu.channel1.volume == 0
+
+
+def test_channel1_trigger_leaves_channel2_off(pulse1: APU) -> None:
+    assert not pulse1.channel2.enabled
+
+
+def test_nr22_does_not_touch_channel1(pulse1: APU) -> None:
+    pulse1.write(NR22, 0x00)
+
+    assert pulse1.channel1.enabled
+    assert pulse1.channel1.volume == 15
+
+
+def test_power_off_stops_channel_1(pulse1: APU) -> None:
+    pulse1.write(NR52, 0x00)
+
+    assert not pulse1.channel1.enabled
+    assert pulse1.read(NR52) == 0x70
+
+
+def test_samples_add_both_channels(apu: APU) -> None:
+    apu.write(NR12, 0x08)  # volume 0, up: DAC on, output 0
+    apu.write(NR22, 0x08)
+
+    apu.tick(FRAME)
+
+    assert set(apu.samples) == {16000}
