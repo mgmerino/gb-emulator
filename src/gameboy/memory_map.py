@@ -36,8 +36,10 @@ NR11: Final = 0xFF11
 NR12: Final = 0xFF12
 NR13: Final = 0xFF13
 NR14: Final = 0xFF14
-# Channel 2 (0xFF15 is unused)
+# Channel 2
 NR21: Final = 0xFF16
+# unused on hardware, but convinient for using it as an offset for channel 2
+NR20: Final = NR21 - 1
 NR22: Final = 0xFF17
 NR23: Final = 0xFF18
 NR24: Final = 0xFF19
