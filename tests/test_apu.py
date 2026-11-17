@@ -9,6 +9,7 @@ NR11 = 0xFF11
 NR12 = 0xFF12
 NR13 = 0xFF13
 NR14 = 0xFF14
+NR20 = 0xFF15
 NR21 = 0xFF16
 NR22 = 0xFF17
 NR23 = 0xFF18
@@ -767,3 +768,111 @@ def test_samples_add_both_channels(apu: APU) -> None:
     apu.tick(FRAME)
 
     assert set(apu.samples) == {16000}
+
+
+# --- channel 1: sweep ---
+
+
+def sweeping(apu: APU, nr10: int, period: int) -> APU:
+    apu.write(NR10, nr10)
+    apu.write(NR12, DAC_ON)
+    set_period1(apu, period, trigger=True)
+    return apu
+
+
+def test_sweep_waits_for_step_2(apu: APU) -> None:
+    sweeping(apu, 0x12, 1000)  # pace 1, up, step 2
+
+    frame_steps(apu, 2)
+
+    assert apu.channel1.period == 1000
+
+
+def test_sweep_up_writes_the_period_back(apu: APU) -> None:
+    sweeping(apu, 0x12, 1000)
+
+    frame_steps(apu, 3)
+    assert apu.channel1.period == 1250
+
+    frame_steps(apu, 4)
+    assert apu.channel1.period == 1562
+
+
+def test_sweep_keeps_the_length_enable_bit(apu: APU) -> None:
+    apu.write(NR10, 0x12)
+    apu.write(NR12, DAC_ON)
+    apu.write(NR13, 1000 & 0xFF)
+    apu.write(NR14, TRIGGER | LENGTH_ENABLE | 1000 >> 8)
+
+    frame_steps(apu, 3)
+
+    assert apu.read(NR14) & LENGTH_ENABLE
+
+
+def test_sweep_overflow_turns_the_channel_off(apu: APU) -> None:
+    sweeping(apu, 0x12, 1000)
+
+    frame_steps(apu, 11)  # 1952, and the check after it gives 2440
+
+    assert apu.channel1.period == 1952
+    assert not apu.channel1.enabled
+    assert apu.read(NR52) == 0xF0
+
+
+def test_sweep_follow_up_check_turns_off_at_once(apu: APU) -> None:
+    sweeping(apu, 0x11, 1000)  # pace 1, up, step 1
+
+    frame_steps(apu, 3)  # 1500, and the check after it gives 2250
+
+    assert apu.channel1.period == 1500
+    assert not apu.channel1.enabled
+
+
+def test_sweep_down_lowers_the_period(apu: APU) -> None:
+    sweeping(apu, 0x1A, 1000)  # pace 1, down, step 2
+
+    frame_steps(apu, 3)
+
+    assert apu.channel1.period == 750
+
+
+def test_sweep_pace_2_waits_two_clocks(apu: APU) -> None:
+    sweeping(apu, 0x22, 1000)  # pace 2, up, step 2
+
+    frame_steps(apu, 3)
+    assert apu.channel1.period == 1000
+
+    frame_steps(apu, 4)
+    assert apu.channel1.period == 1250
+
+
+def test_sweep_step_0_keeps_the_period(apu: APU) -> None:
+    sweeping(apu, 0x10, 1000)  # pace 1, up, step 0
+
+    frame_steps(apu, 64)
+
+    assert apu.channel1.period == 1000
+    assert apu.channel1.enabled
+
+
+def test_sweep_pace_0_keeps_the_period(apu: APU) -> None:
+    sweeping(apu, 0x02, 1000)  # pace 0, up, step 2
+
+    frame_steps(apu, 64)
+
+    assert apu.channel1.period == 1000
+    assert apu.channel1.enabled
+
+
+def test_trigger_with_overflow_turns_off_at_once(apu: APU) -> None:
+    sweeping(apu, 0x01, 2000)  # pace 0, up, step 1: 2000 + 1000
+
+    assert not apu.channel1.enabled
+
+
+def test_channel2_has_no_sweep(playing: APU) -> None:
+    playing.write(NR20, 0x12)
+
+    frame_steps(playing, 64)
+
+    assert playing.channel2.period == 1750

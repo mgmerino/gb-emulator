@@ -73,15 +73,18 @@ DUTY_STEPS: Final = 8
 
 # The period divider counts up from the period and reloads when it reaches 2048.
 PERIOD_OVERFLOW: Final = 2048
+MAX_PERIOD: Final = PERIOD_OVERFLOW - 1
 MAX_LENGTH: Final = 64
 MAX_VOLUME: Final = 15
 
 SEQUENCER_STEPS: Final = 8
 ENVELOPE_STEP: Final = 7
+SWEEP_STEPS: Final = (2, 6)
 
 SAMPLE_RATE: Final = 48_000
 CHANNEL_PEAK: Final = 8_000
 CLOCK_HZ: Final = 4_194_304
+SWEEP_ZERO_PACE: Final = 8
 
 # What the boot ROM leaves in the registers, from Pan Docs. NR52 goes first:
 # `write` ignores the rest while the APU is off. The other registers read as 0.
@@ -216,18 +219,80 @@ class PulseChannel:
 
 
 @dataclass(slots=True)
+class SweepChannel(PulseChannel):
+    shadow: int = 0
+    sweep_timer: int = 0
+    sweep_enabled: bool = False
+
+    # NR10   │ - │ pace (6-4) │ dir (3) │ step (2-0) │
+    @property
+    def _sweep_pace(self) -> int:
+        mask = 0b0111_0000
+
+        return (self.regs[NRX0] & mask) >> 4
+
+    @property
+    def _subtracting(self) -> bool:
+        mask = 0b0000_1000
+
+        return self.regs[NRX0] & mask != 0
+
+    @property
+    def _step(self) -> int:
+        mask = 0b0000_0111
+
+        return self.regs[NRX0] & mask
+
+    @property
+    def _sweep_reload(self) -> int:
+        return self._sweep_pace if self._sweep_pace != 0 else SWEEP_ZERO_PACE
+
+    def trigger(self) -> None:
+        super(SweepChannel, self).trigger()
+
+        self.shadow = self.period
+        self.sweep_timer = self._sweep_reload
+        self.sweep_enabled = self._sweep_pace != 0 or self._step != 0
+        if self._step != 0:
+            self._next_period()
+
+    def clock_sweep(self) -> None:
+        if self.sweep_timer > 0:
+            self.sweep_timer -= 1
+
+        if self.sweep_timer == 0:
+            self.sweep_timer = self._sweep_reload
+            if self.sweep_enabled and self._sweep_pace != 0:
+                new = self._next_period()
+                if new <= MAX_PERIOD and self._step != 0:
+                    self.shadow = new
+                    self.regs[NRX3] = new & 0xFF
+                    # keep the high bits (length enable) and apply in the 3 LSB
+                    self.regs[NRX4] = (self.regs[NRX4] & 0b1111_1000) | new >> 8
+                    self._next_period()
+
+    def _next_period(self) -> int:
+        delta = self.shadow >> self._step
+        new = self.shadow - delta if self._subtracting else self.shadow + delta
+        if new > MAX_PERIOD:
+            self.enabled = False
+
+        return new
+
+
+@dataclass(slots=True)
 class APU:
     registers: bytearray = field(default_factory=lambda: bytearray(0x20))
     wave_ram: bytearray = field(default_factory=lambda: bytearray(16))
-    channel1: PulseChannel = field(init=False)
+    channel1: SweepChannel = field(init=False)
     channel2: PulseChannel = field(init=False)
     sequencer_step: int = 0
     samples: array[int] = field(default_factory=lambda: array("h"))
     sample_acc: int = 0
 
     def __post_init__(self) -> None:
+        self.channel1 = SweepChannel(self._channel_regs(NR10))
         self.channel2 = PulseChannel(self._channel_regs(NR20))
-        self.channel1 = PulseChannel(self._channel_regs(NR10))
 
     @classmethod
     def post_boot(cls) -> Self:
@@ -265,8 +330,9 @@ class APU:
             # switch off the APU
             if not get_bit(masked, 7):
                 self.registers[0:0x16] = bytes(0x16)
+                self.channel1 = SweepChannel(self.channel1.regs)
                 self.channel2 = PulseChannel(self.channel2.regs)
-                self.channel1 = PulseChannel(self.channel1.regs)
+
                 # not 100% accurate, hardware quirck on poweroff are ignored
                 # for now
                 self.sequencer_step = 0
@@ -286,10 +352,14 @@ class APU:
         # step       0   1   2   3   4   5   6   7
         # length     ●       ●       ●       ●
         # envelope                               ●
+        # sweep              ●               ●
 
         if self.sequencer_step % 2 == 0:
             self.channel1.clock_length()
             self.channel2.clock_length()
+
+        if self.sequencer_step in SWEEP_STEPS:
+            self.channel1.clock_sweep()
 
         if self.sequencer_step == ENVELOPE_STEP:
             self.channel1.clock_envelope()
