@@ -32,6 +32,8 @@ tour:
 | 13B | [Real time: profile, optimise, then pace the frames](docs/STEP_13B.md) | done |
 | 14 | [The joypad](docs/STEP_14.md) | done |
 | 17A | [Sound from numbers: square waves, duty, envelope, mixing](docs/STEP_17A.md) | done |
+| 17B | [The APU: registers, channel 2, the frame sequencer](docs/STEP_17B.md) | done |
+| 17C | [The APU: channels 1, 3 and 4, the mixer](docs/STEP_17C.md) | task 1 of 4 done |
 
 ## Requirements
 
@@ -160,9 +162,11 @@ uv run python -O -m gameboy path/to/TETRIS.gb --frame 1800 --budget 12000000 --a
 wrote tetris.wav: 30.34 s of audio
 ```
 
-Without `--out`, the last frame still prints as text after that line. Only
-channel 2 sounds so far. In Tetris that is the top voice of the title demo's
-music, which starts at about 8.6 seconds.
+Without `--out`, the last frame still prints as text after that line. The two
+pulse channels sound so far, channel 1 with its sweep. In Tetris they play two
+voices of the title demo's music, which starts at about 8.6 seconds. Until the
+mixer arrives, the WAV is the plain sum of both channels, so silence sits at a
+constant level instead of 0.
 
 Play a ROM in a window. The window needs pygame, which is an optional extra, so
 the emulator and its tests still install nothing:
